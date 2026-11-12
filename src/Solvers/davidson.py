@@ -378,8 +378,16 @@ class _Deflated:
 
     def __init__(self, matvec, block, X, lift):
         self.X, self.lift, self._mv, self._block = X, lift, matvec, block
-        if block is not None:
-            self.matmat = self._matmat
+
+    @property
+    def matmat(self):
+        # there only where the operator has a block (solve_symmetric reads it
+        # with getattr), and bound at each read: a bound method kept on the
+        # instance refers back to it, a cycle that holds the operator until
+        # the cycle collector runs
+        if self._block is None:
+            raise AttributeError('matmat')
+        return self._matmat
 
     def _matmat(self, V):
         X = self.X

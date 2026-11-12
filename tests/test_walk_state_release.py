@@ -16,8 +16,14 @@ steps 0.01 Angstrom apart.
      first step's S0 model nor its triplet model is alive; `last_ground` is
      the second step's S0 model afterwards (the force reads it).
 
+Both walks run with the cycle collector off, so the previous step's model has
+to go by reference counting alone: one that only a reference cycle keeps would
+otherwise go or stay by whether the collector happened to run in between,
+which its thresholds decide.
+
 Run: python -m pytest -q tests/test_walk_state_release.py
 """
+import gc
 import os
 import sys
 import weakref
@@ -58,6 +64,7 @@ def walk():
         return state
 
     ee_ri_fold.RIFoldADC2.__init__ = recorded
+    gc.disable()
     try:
         surf = SolvatedSurface(MOL1, NoMedium, make_state, label='S1 gas')
         surf.total_gradient(MOL1)
@@ -65,6 +72,7 @@ def walk():
         n_ops = len(ops)
         surf.total_gradient(MOL2)
     finally:
+        gc.enable()
         ee_ri_fold.RIFoldADC2.__init__ = init
     return surf, built, n_ops, alive, start
 
@@ -103,10 +111,14 @@ def walk_noneq():
         return state
 
     shift = np.full((len(ATOMS), 3), 0.01 / 0.529177210903)
-    surf = SolvatedSurface(molecule(ATOMS), toluene, make_state, label='T1 toluene neq',
-                           make_ground=make_ground, noneq=True)
-    surf.total_gradient(molecule(ATOMS))
-    surf.total_gradient(molecule(ATOMS, shift=shift))
+    gc.disable()
+    try:
+        surf = SolvatedSurface(molecule(ATOMS), toluene, make_state, label='T1 toluene neq',
+                               make_ground=make_ground, noneq=True)
+        surf.total_gradient(molecule(ATOMS))
+        surf.total_gradient(molecule(ATOMS, shift=shift))
+    finally:
+        gc.enable()
     return surf, grounds, alive
 
 

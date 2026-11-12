@@ -30,7 +30,8 @@ thioformaldehyde 114 of 1764.
         6.9e-14 eV in the root and 3.2e-15 in Z, the quadrature's difference.
         The bare Laplace fit at the frequencies the converged roots ask for
         is at most 2.5e-11, against the 1e-08 of `LAPLACE_SCREENING_TOL`.
-  sop   energy and Z bitwise against the pins. Against the record the root
+  sop   energy and Z bitwise against the pins; off the recording BLAS, Z to
+        the 'continued' bar (`CONTINUED_Z_ROUTES`). Against the record the root
         may be one ulp out: the audit chain starts the pole model's Newton at
         the contour root, production at eps_p pushed off its own pole; both
         reach the same fixed point, and the last accepted step (|step| <
@@ -80,6 +81,16 @@ MOLECULES = ('water', 'formaldehyde', 'thioformaldehyde')
 #: Routes read off a Pade continuation, which amplifies the fit's last bits:
 #: their pins take the 'continued' bar.
 CONTINUED_ROUTES = ('st-pade', 'space-time')
+#: Routes whose Z pins take the 'continued' bar: those, and the pole model,
+#: whose energy keeps the energy bar. Its Z is the slope of a self-energy
+#: whose poles come out of the vector fit (`sum_over_poles.fit_poles`), and on
+#: thioformaldehyde's HOMO-1 that fit's first least squares has condition
+#: number 3.6e10 and its five passes leave the poles still moving, so the fit
+#: amplifies the screening's last bits as a continuation does: off the
+#: recording BLAS that Z moves with the BLAS thread count, by 1.4e-12 to
+#: 3.9e-12 (arm64 OpenBLAS, one to four threads) against the energy bar's
+#: 2e-12, while the root stays within a fifth of its bar.
+CONTINUED_Z_ROUTES = CONTINUED_ROUTES + ('sop',)
 
 #: How far each molecule's roots (eV) and pole strengths sit from the record,
 #: with headroom: the ISDF grid the record predates moves them, 0.96 meV on
@@ -108,7 +119,7 @@ SOP_FACTORIZATION_MOVE_EV = 2e-9
 SOP_FACTORIZATION_MOVE_Z = 1e-10
 #: How far merging coalesced poles (SOP_POLE_MERGE_TOL) puts the sop rows
 #: from the record: at most 3.8e-5 eV and 2.8e-5 in Z (thioformaldehyde
-#: HOMO-1, whose fit keeps 8 of 12 poles; 1.5e-6 eV on water's HOMO). Against
+#: HOMO-1, whose fit keeps 7 of 12 poles; 1.5e-6 eV on water's HOMO). Against
 #: the contour route on the same grid the rows sit within 0.0012 meV, that
 #: HOMO-1 at 0.038 meV.
 SOP_POLE_MERGE_MOVE_EV = 5e-5
@@ -201,8 +212,9 @@ def assert_pinned(name, rec, route, energy, pole_strength=None, slack=0.0,
     moved = abs(energy - row['energy_eV'])
     assert moved <= RECORD_MOVE_EV[name] + slack, (where, moved)
     if pole_strength is not None:
+        z_quantity = 'continued' if route in CONTINUED_Z_ROUTES else quantity
         assert_pin(pole_strength, pin['z'], PINS_BLAS, '1',
-                   quantity=quantity, label=where)
+                   quantity=z_quantity, label=where)
         moved = abs(pole_strength - row['z'])
         assert moved <= RECORD_MOVE_Z[name] + z_slack, (where, moved)
 

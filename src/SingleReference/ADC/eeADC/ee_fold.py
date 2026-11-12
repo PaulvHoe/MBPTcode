@@ -414,7 +414,10 @@ class _Shifted:
     def __init__(self, mv, d):
         self.mv, self.d = mv, np.asarray(d, float)
         if hasattr(mv, 'matmat'):
-            self.matmat = lambda U: mv.matmat(U) + self.d[:, None] * U
+            # over mv and d, not self: a lambda over its own instance is a
+            # cycle that holds mv until the cycle collector runs
+            d = self.d
+            self.matmat = lambda U: mv.matmat(U) + d[:, None] * U
 
     def __call__(self, u):
         return self.mv(u) + self.d * np.ravel(u)
