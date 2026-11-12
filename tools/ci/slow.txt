@@ -179,3 +179,7 @@ script test_ee_dbse2_ri_fold.py
 script test_ee_dbse2_fold.py
 # Placed by the 60 s rule on workstation wall times (2 threads): test_ee_ri_flip 136 s
 script test_ee_ri_flip.py
+# the parquet port's long runs: slow by the 60 s rule (workstation wall times, 2 threads, each file alone, load 3 to 4 from other processes: 85 to 95 s)
+pytest test_parquet_restricted_vs_quack_slow.py
+pytest test_parquet_so_vs_quack_slow.py
+pytest test_parquet_qp_solver_slow.py

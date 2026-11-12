@@ -23,6 +23,8 @@
   from O(N⁶) to O(N³), Casida/RPA, RPA correlation energies, static screening
 - [BSE](methods/bse.md) — the Davidson Bethe-Salpeter equation on ISDF or
   density-fitted factors
+- [Parquet approximation](methods/parquet.md) — FLEX, osPA, evPA and qsPA of
+  Marie and Loos, ported from Quack: closed shell and in spin orbitals
 - [Low-scaling factorization](methods/isdf-low-scaling.md) — the separable RI
   (ISDF) behind the O(N³) routes and ISDF-J/K for the SCF
 - [Environments](methods/environments.md) — polarizable-continuum screening,

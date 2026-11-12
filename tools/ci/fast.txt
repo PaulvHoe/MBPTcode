@@ -521,3 +521,17 @@ pytest test_duschinsky_soft_modes.py
 pytest test_duschinsky_cumulants.py
 pytest test_rate_ladder_refusals.py
 pytest test_herzberg_teller_curvilinear.py
+# the parquet port (Marie and Loos, 2025): placed by the 60 s rule on workstation wall times (2 threads, each file alone, load 3 to 4 from other processes): 0.3 to 38 s
+pytest test_parquet_restricted_vs_quack.py
+pytest test_parquet_so_vs_quack.py
+pytest test_parquet_small_systems.py
+pytest test_parquet_spin_adaptation.py
+pytest test_parquet_qp_solver.py
+pytest test_parquet_flags.py
+pytest test_parquet_diis.py
+pytest test_parquet_refusals.py
+pytest test_parquet_vertex_hook.py
+pytest test_parquet_so_layout.py
+pytest test_parquet_result_layout.py
+pytest test_parquet_internals.py
+pytest test_parquet_memory.py

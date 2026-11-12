@@ -110,6 +110,11 @@ src/SingleReference/
     BSE/                       solve.py: the BSE drivers (solve_bse,
                                solve_bse_isdf, solve_bse_df); the dense
                                quasi-boson BSE; the upfolded BSE
+    Parquet/                   the parquet approximation of Marie and Loos,
+                               ported from Quack: FLEX, osPA, evPA and qsPA,
+                               closed shell (restricted.run_parquet) and in
+                               spin orbitals (spin_orbital.run_parquet_so);
+                               see Parquet/__init__.py for the map
     Periodic/                  k-point RPA, BSE and GW (see
                                methods/periodic.md)
     common/                    pieces several methods share: MP1 amplitudes,

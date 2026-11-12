@@ -2715,3 +2715,160 @@ EE_GW_SLAB_BLOCKS = 3
 # w_t τ_t) are not bounded by it, pointwise 2e-9 on [0.3, 8], 8e-9 on [0.3, 40],
 # 3.4e-8 on [0.01, 100]; water 6-31G, every vector: <= 1.2e-10
 EE_GW_LAPLACE_TARGET = 1e-9
+
+# ---------------------------------------------------------------------------
+# src/SingleReference/Parquet/: the parquet approximation of Marie and Loos
+# (J. Chem. Phys. 163, 194115 (2025)) as Quack runs it
+# ---------------------------------------------------------------------------
+
+# The damping of the two-body loops as evGW means it (GW/evGW.py): the weight
+# d of the PREVIOUS reducible vertices, Phi <- (1 - d) Phi_new + d Phi_old, so
+# Quack's mixing weight of the NEW vertices, alpha, is 1 - d (exactly, for both
+# values here). 0.75 in R_evParquet, R_qsParquet and G_qsParquet (alpha 0.25).
+PARQUET_VERTEX_DAMPING = 0.75
+# G_evParquet takes the new vertices whole (alpha 1; it still evaluates
+# 1 Phi_new + 0 Phi_old).
+PARQUET_SO_EV_VERTEX_DAMPING = 0.0
+# LAPACK driver of the qsPA diagonalizations of the Fock matrix and of the
+# overlap (Quack's diagonalize_matrix: dsyev).
+PARQUET_QS_EIGH_DRIVER = 'ev'
+# Quack's default DIIS lengths of the one-body and two-body loops (read_options:
+# 1, no DIIS at all).
+PARQUET_MAX_DIIS_1B = 1
+PARQUET_MAX_DIIS_2B = 1
+# The flow parameters s_1b = s_2b of the paper's Table III, Hartree^-2.
+PARQUET_REGULARIZATION = 50.0
+# The paper's thresholds tau_1b = tau_2b on the one-body and two-body changes
+# (Sec. VII C).
+PARQUET_CONVERGENCE = 1e-4
+# Two-body iteration cap: Quack's water and ammonia osPA (TDA, s_2b 1 and 10)
+# took 150 to 200 iterations to converge to 1e-9.
+PARQUET_MAX_IT_2B = 200
+# One-body iteration cap of evPA and qsPA: Quack's water and ammonia evPA took
+# 8 and 10 iterations to converge to 1e-7.
+PARQUET_MAX_IT_1B = 50
+# Quack's starting err_1b and err_2b (1d0): a threshold at or above it would
+# not let its loops start, so a threshold must lie below.
+PARQUET_QUACK_INITIAL_ERROR = 1.0
+# Quack's orthogonalization_matrix: overlap eigenvalues at or below this are
+# dropped from the canonical orthogonalization X = U s^-1/2 of qsPA.
+PARQUET_ORTHOGONALIZATION_THRESHOLD = 1e-6
+# Largest |element| (Hartree) by which the beta block of a GHF's core
+# Hamiltonian may differ from its alpha block, and its spin-off-diagonal blocks
+# from zero, for the spin-orbital qsPA to take the alpha block: Quack's
+# G_qsParquet puts one Hc on both spin blocks, and pyscf's GHF.get_hcore is
+# block_diag(h, h) to the bit without spin-orbit or Zeeman terms (a Zeeman-like
+# term of 1e-3 Ha is refused).
+PARQUET_SO_HCORE_SPIN_TOL = 1e-10
+# How close to 1 the alpha weight c_a^T S c_a (beta weight c_b^T S c_b) of a
+# final spin-orbital qsPA orbital must be for run_parquet_so to label it alpha
+# (beta) in result.spin; one further from both is -1, mixed (the degenerate
+# alpha/beta pairs of a closed shell, which the eigensolver rotates at will:
+# weight defects up to 0.105 on water/6-31G). A collinear open shell's orbitals
+# are pure to roundoff: |c^T S c - 1| of the dominant spin about 1e-15 (OH
+# UHF/6-31G qsPA: 2.7e-15), the other spin's weight 1e-23 to 1e-29.
+PARQUET_SO_SPIN_WEIGHT_TOL = 1e-8
+# LAPACK driver of the symmetric BSE diagonalizations (Quack: dsyev).
+# Divide and conquer gives the same eigenvalues and eigenspaces to rounding,
+# six times faster at n = 3000; the paper's pp problems reach n ~ 9000.
+PARQUET_EIGH_DRIVER = 'evd'
+# Quack's orthogonalize_matrix thresh: a pp branch's metric-overlap eigenvalue
+# below it is reported as a near-singular Loewdin step.
+PARQUET_LOWDIN_SMALL_EIGENVALUE = 1e-6
+# Largest gap (Hartree) ppRLR and ppGLR let pass between EcRPA and the
+# correlation energies of the 2p and 2h branches before they print
+# 'RPA1 != RPA2'.
+PARQUET_PP_EC_CONSISTENCY_TOL = 1e-6
+# sort_ppRPA's split of the full pp spectrum (Quack's chemical potential
+# eF = 0): eigenvalues above it are the 2p (ee) branch, the rest 2h (hh).
+PARQUET_PP_BRANCH_SPLIT = 0.0
+# |Im| / max(1, max |Re|) of a spin-orbital pp root below which a complex pair
+# is a degenerate real pair split by roundoff (seen at 6e-17): only gates the
+# flag, since Quack drops the imaginary parts regardless.
+PARQUET_PP_COMPLEX_TOL = 1e-10
+# An eh excitation energy (Hartree) of the full eh BSE, in either parquet driver,
+# below which it flags a zero mode ('parquet_eh_zero_mode'; the root is kept, as
+# Quack keeps it): the spin rotation a collinear open shell breaks sits at the
+# SCF residual, where X + Y ~ Om^-1/2 takes over the vertices (bare UHF/6-31G:
+# Om of 1e-7 to 5e-7 Ha for NH2, CH3 and O2 at conv_tol 1e-7 to 1e-12, 1.4e-4 Ha
+# for CN at conv_tol 1e-7), and so does a closed shell's lowest root at the edge
+# of an instability (H2/6-31G: Om of 3.6e-4 Ha, Sigma_c of the HOMO -5346 eV);
+# molecular eh excitations lie far above (the next root of CN 0.044 Ha, of NH2
+# 0.07 Ha; the lowest of water/6-31G 0.31 Ha). Under the spin-orbital TDA a root
+# is a negative excitation ('parquet_eh_tda_negative_excitations') only below
+# minus this: a one-electron system's spin flip is an exact zero that roundoff
+# puts on either side (the H atom in 6-31G: -1.4e-15 Ha).
+PARQUET_EH_ZERO_MODE_TOL = 1e-3
+# Fewest blocks a pass over one vertex is cut into, whatever its byte constant
+# below allows: each scratch block of the closed-shell vertex change, damping
+# and non-finite count and vertex products, of the closed-shell pp effective
+# integrals' gathered irreducible vertex, of the spin-orbital vertex change,
+# damping and non-finite count, and of the parquet DIIS accumulation holds at
+# most 1/8 of the vertex (by the byte constants alone the change, eh and DIIS
+# blocks would be the whole vertex up to norb 53 or 76, and every block more
+# than 1/8 of it up to norb 90 or 127).
+PARQUET_MIN_BLOCKS_PER_VERTEX = 8
+# Bytes of the blocks over the first orbital index in which the restricted
+# driver passes over a vertex (at most 1/PARQUET_MIN_BLOCKS_PER_VERTEX of it):
+# the change max |Phi_old - Phi_new|, the damping without DIIS, written into
+# the old vertex in place, and the count of a custom vertex builder's NaN and
+# inf; no norb^4 temporary.
+PARQUET_CHANGE_BLOCK_BYTES = 64 * 2**20
+# Bytes of each block temporary of the spin-orbital driver's passes over nso^4
+# arrays: the vertex change, the damping and the count of a custom vertex
+# builder's NaN and inf, each block also at most
+# 1/PARQUET_MIN_BLOCKS_PER_VERTEX of a vertex, and the integral transformation.
+PARQUET_SO_DRIVER_BLOCK_BYTES = 2**27
+# Bytes of each block temporary of the spin-orbital N^4 builds (vertices, pp
+# effective integrals): every block is still a large GEMM, small beside the output.
+PARQUET_SO_BLOCK_BYTES = 2**28
+# Bytes of the scratch block of the crossed closed-shell eh vertex product,
+# [(p, r), (q, s)] a block of p at a time: twelve GEMMs of 1656 rows at
+# norb 138, where the vertex itself is 2.9 GB; below norb 128 the cap of
+# 1/PARQUET_MIN_BLOCKS_PER_VERTEX of the vertex takes over (5 values of p at
+# norb 41).
+PARQUET_EH_VERTEX_BLOCK_BYTES = 2**28
+# Bytes of the weighted M^ee rows r_ee * w_ee the closed-shell pp vertex
+# product takes at a time, in equal blocks: at norb 138 six GEMMs of 3174 rows
+# for the singlet (nVV 8911) and five of 3809 for the triplet (nVV 8778), where
+# the whole product would be 1.36 GB; below norb 128 at most
+# 1/PARQUET_MIN_BLOCKS_PER_VERTEX of the vertex.
+PARQUET_PP_VERTEX_BLOCK_BYTES = 2**28
+# Bytes of the block of the closed-shell pp irreducible vertex K_{pq,(rs)} that
+# the pp effective integrals gather onto the pairs and contract at a time, a
+# block of p (below norb 128 at most 1/PARQUET_MIN_BLOCKS_PER_VERTEX of a
+# vertex): at norb 138 six blocks of up to 27 values of p (9.9 MB per p for the
+# singlet), where the whole gathered vertex is 1.36 GB.
+PARQUET_PP_INTEGRAL_BLOCK_BYTES = 2**28
+# Bytes of one block of the regularized ee amplitudes and of the <pc|ab> slabs
+# the diagonal closed-shell self-energy streams: about 1 GB of working memory at
+# norb 138, each block's GEMM still at BLAS speed.
+PARQUET_SELF_ENERGY_BLOCK_BYTES = 64 * 2**20
+# Elements of each of the six per-thread buffers of the closed-shell SRG pair
+# kernel (256 KiB): a thread's block stays in its core's L2 cache while all its
+# rows run over it (2.9-3.0 ns/element at 2^14-2^15 against 6.1 at 2^18).
+PARQUET_SRG_PAIR_BLOCK_ELEMS = 2**15
+# Elements of each block of the 2p amplitudes rho^ee[a, b, n] times their
+# denominator in the static closed-shell self-energy (64 MiB): whole, they are
+# 1.3 GB at CH4/aug-cc-pVTZ.
+PARQUET_STATIC_PP_BLOCK_ELEMS = 2**23
+# Elements of one working array of the spin-orbital self-energy (32 MB): its
+# orbital blocks and pole chunks are cut to it.
+PARQUET_SO_WORK_BLOCK_ELEMENTS = 2**22
+# Elements of one block of the spin-orbital product-term contraction (128 MB):
+# more rows per GEMM over rho_ee's (a, b) block (16 GF/s at 1380 rows against 12
+# at 120, norb 138).
+PARQUET_SO_PRODUCT_BLOCK_ELEMENTS = 2**24
+# Numbers of one pole chunk of the spin-orbital static kernel sums (8 MB): its
+# columns stay in a core's cache while each orbital takes its row (1.7 to 3
+# times faster than whole rows at norb 138).
+PARQUET_SO_KERNEL_CACHE_ELEMENTS = 2**20
+# Elements of precomputed residues and integrals one orbital block of the
+# spin-orbital diagonal self-energy holds (512 MB), so the diagonal of every
+# orbital never holds all of them at once.
+PARQUET_SO_DIAGONAL_BLOCK_ELEMENTS = 2**26
+# Bytes of the blocks in which the parquet DIIS accumulates its extrapolated
+# iterate sum_k w_k x_k into the caller's arrays, one scratch block for every
+# block of the vector and at most 1/PARQUET_MIN_BLOCKS_PER_VERTEX of the
+# largest: no temporary of the size of one vertex (2.9 GB at norb 138).
+PARQUET_DIIS_BLOCK_BYTES = 64 * 2**20
