@@ -35,7 +35,9 @@ energy-dependent regularizer of Eq. 52):
     i Phi^eh_pqrs(w) = sum_n [M_pr,n M_sq,n g(w - Om_n) - M_rp,n M_qs,n g(w + Om_n)],
     i Phi^pp_pqrs(w) = sum_m M^ee_pq,m M^ee_rs,m g(w - Om^ee_m)
                      - sum_m M^hh_pq,m M^hh_rs,m g(w - Om^hh_m),
-    g(x) = (1 - exp(-2 eta x^2)) / x.
+    g(x) = (1 - exp(-2 eta x^2)) / x,
+
+and g(0) = 0, its limit, where Quack's formula is 0/0 (`regularized_inverse`).
 
 Quack's G_eh_Phi and G_pp_Phi are the static vertices, w = 0. The frequency
 w enters as in the restricted R_eh_singlet_Phi and R_pp_singlet_Phi, so a
@@ -808,10 +810,16 @@ def regularized_inverse(dem, eta):
     regularized reducible vertices (Eq. 52, Quack's two-body regularizer).
 
     eta = 0 is complete regularization (g = 0: the vertices vanish, FLEX);
-    large eta leaves 1/dem. dem = 0 gives NaN (0/0), as Quack's. A dem so
-    large that dem^2 overflows (above about 1e154 Ha, eigenvalues of a
-    diverging two-body loop) gives exp(-inf) = 0 and the finite 1/dem,
-    without a warning.
+    large eta leaves 1/dem. dem = 0 exactly (omega on a pole: a zero mode at
+    omega = 0, such as a one-electron system's spin flip) gives the limit 0
+    (g is 2 eta dem to first order), where Quack's formula is 0/0 = NaN: the
+    port departs from Quack there alone, so that such a mode weighs nothing
+    whether rounding puts it at 0 or a few ulps off (where 1 - exp rounds to
+    0); every other dem is evaluated by the formula as written. A NaN dem
+    gives NaN (the callers count the weights that are not finite,
+    `_flag_poles`). A dem so large that dem^2 overflows (above about 1e154
+    Ha, eigenvalues of a diverging two-body loop) gives exp(-inf) = 0 and
+    the finite 1/dem, without a warning.
 
     Parameters
     ----------
@@ -828,15 +836,19 @@ def regularized_inverse(dem, eta):
     # 0 and g = 1/dem, finite, so the overflow is no event (the callers count what is not
     # finite, `_flag_poles`)
     with np.errstate(invalid='ignore', divide='ignore', over='ignore'):
-        return (1.0 - np.exp(-2.0 * eta * dem * dem)) / dem
+        g = (1.0 - np.exp(-2.0 * eta * dem * dem)) / dem
+    zero = dem == 0.0
+    if zero.any():
+        g = np.where(zero, 0.0, g)          # Quack's 0/0: the limit, 2 eta dem -> 0
+    return g
 
 
 def _flag_poles(weights, what):
     bad = sum(int(np.sum(~np.isfinite(w))) for w in weights)
     if bad:
         flag(FLAG_VERTEX_POLE,
-             f'{what}: {bad} pole weight(s) not finite (omega on a pole, or a NaN '
-             f'eigenvalue); the vertex is NaN there, as in Quack', ParquetNotFinite,
+             f'{what}: {bad} pole weight(s) not finite (an eigenvalue or omega that is '
+             f'not finite); the vertex is NaN there, as in Quack', ParquetNotFinite,
              stacklevel=3)
 
 
@@ -960,9 +972,9 @@ def eh_reducible_vertex_so(om, rho, eta, omega=0.0):
     -------
     phi : ndarray (N, N, N, N)
 
-    A pole hit (omega = +-Om_n) or a NaN energy gives NaN, flagged
-    'parquet_vertex_pole'. Cost: 4 N^4 nS flops; memory the N^4 output and
-    two blocks of at most PARQUET_SO_BLOCK_BYTES.
+    A pole hit (omega = +-Om_n exactly) weighs 0, the limit of g; a NaN
+    energy gives NaN, flagged 'parquet_vertex_pole'. Cost: 4 N^4 nS flops;
+    memory the N^4 output and two blocks of at most PARQUET_SO_BLOCK_BYTES.
     """
     om = np.asarray(om, dtype=float)
     w_res = regularized_inverse(omega - om, eta)
@@ -999,9 +1011,9 @@ def pp_reducible_vertex_so(om_ee, rho_ee, om_hh, rho_hh, eta, omega=0.0):
     -------
     phi : ndarray (N, N, N, N)
 
-    A pole hit or a NaN energy gives NaN, flagged 'parquet_vertex_pole'.
-    Cost: 2 N^4 (nVV + nOO) flops; memory the N^4 output and one block of at
-    most PARQUET_SO_BLOCK_BYTES.
+    A pole hit (omega = Om exactly) weighs 0, the limit of g; a NaN energy
+    gives NaN, flagged 'parquet_vertex_pole'. Cost: 2 N^4 (nVV + nOO) flops;
+    memory the N^4 output and one block of at most PARQUET_SO_BLOCK_BYTES.
     """
     om_ee = np.asarray(om_ee, dtype=float)
     om_hh = np.asarray(om_hh, dtype=float)

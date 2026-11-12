@@ -35,6 +35,16 @@ The events come from the inputs that make them (docs/warnings.md):
 * quasiparticle roots: a linearized energy with Z outside (0, 1], and an
   equation without a root (a self-energy patched to a constant 1000 Ha).
 
+Two denominators are no event: one so large that its square overflows,
+and one exactly zero, Quack's 0/0, whose regularized weight
+(1 - exp(-2 s d^2)) / d is its limit 0 at every finite s (each such weight
+of the vertices and the self-energies, s from 0 to 1e8; NaN in still NaN
+out, and flagged) and the slope of a pole, (1 - exp(-2 s d^2)) / d^2, 0,
+the formula's value a few ulps off zero (not its limit 2 s): a pole hit
+exactly in the dynamic self-energies of both drivers (on synthetic spectra
+with a zero eh root) adds to Sigma and to its derivative what that pole a
+few ulps off adds, nothing, and the static SRG kernels there are 0.
+
 `test_every_flag_has_its_test` maps each FLAG_* constant of `events` to the
 test that raises it (DIIS's exactly singular system is in
 `test_parquet_diis`; a qp_solver function's 'z_outside' in
@@ -62,11 +72,13 @@ from scipy.linalg import lapack
 from src.Base.numerical_flags import collecting
 from src.Base.numerics.constants import PARQUET_EH_ZERO_MODE_TOL, PARQUET_EIGH_DRIVER
 from src.SingleReference.Parquet import (events, restricted, restricted_bse,
-                                         restricted_self_energy, restricted_vertices,
-                                         spin_orbital, spin_orbital_self_energy,
-                                         spin_orbital_two_body)
+                                         restricted_self_energy, restricted_static_self_energy,
+                                         restricted_vertices, spin_orbital,
+                                         spin_orbital_self_energy, spin_orbital_two_body)
 from src.SingleReference.Parquet.events import (ParquetBSEUnstable, ParquetNotConverged,
                                                 ParquetNotFinite)
+from src.SingleReference.Parquet.pairs import pp_pair_count
+from src.SingleReference.Parquet.spectra import Channel, RestrictedSpectra, SpinOrbitalSpectra
 from src.Solvers.qp_equation import QPNoRoot, QPWeightOutside
 from tests import parquet_quack_newton
 from tests.parquet_quack_newton import quack_newton
@@ -87,6 +99,34 @@ PP_UNSTABLE_SCALE = 50.0
 ZERO_MODE = 2e-4
 #: Ha. H/STO-3G's spin flip lies at zero to this (2.2e-16 measured).
 SPIN_FLIP_ROUNDOFF = 1e-12
+#: Ha^-2. The SRG flow parameters a zero denominator's limits are held at:
+#: none (s = 0, FLEX's vertices), the tests' s_2b, the paper's s and the
+#: unregularized 1e8.
+ZERO_LIMIT_FLOWS = (0.0, 1.0, 50.0, 1e8)
+#: Ha. A zero mode a few ulps off, where 1 - exp(-2 s d^2) rounds to 0 and
+#: so do the weight and Quack's slope (H/STO-3G's spin flip, e_beta -
+#: e_alpha - J, where its energies do not round it to exactly 0).
+ULPS_OFF = 2.220446049250313e-16
+#: Ha. Zero modes held to the one at ULPS_OFF: exactly 0 of either sign and
+#: a few ulps off on either side.
+AT_ZERO = (0.0, -0.0, 1e-16, -1e-16, -ULPS_OFF)
+#: Ha. A zero mode close enough to zero for the slope (1 - exp(-2 s d^2)) /
+#: d^2 to be near its limit 2 s, far enough for 1 - exp to keep digits.
+NEAR_ZERO = 1e-6
+#: The closed-shell derivative with the zero mode NEAR_ZERO off against the
+#: one a few ulps off: 2 s times the pole's residue, the slope's limit an
+#: exact zero does not take, to this, relative (1.1e-6 measured on the
+#: synthetic spectra at s = 50).
+LIMIT_REL = 1e-4
+#: That move of the derivative, relative to the derivative, exceeds this
+#: (0.23 closed shell, 0.078 spin orbitals measured): the pole has a
+#: residue, so the test tells the slope 0 from its limit 2 s.
+RESIDUE_SEEN = 1e-2
+#: Relative. Sigma and dSigma/dw with a zero eh root at AT_ZERO against
+#: ULPS_OFF: Sigma 7.5e-16 at most measured, dSigma/dw the same bits (1.3e-16
+#: at -ULPS_OFF in spin orbitals), the static matrices 3e-16 (the bosonic
+#: denominators move by a few ulps).
+ZERO_SIGMA_REL = 1e-13
 #: Angstrom. H2/6-31G stretched past its RHF triplet instability: the full
 #: eh problem's triplet (A + B) is indefinite at STRETCHED_RPA, its TDA A
 #: at STRETCHED_TDA.
@@ -593,9 +633,8 @@ def test_an_overflowing_denominator_is_no_event():
     two-body loop reach, d^2 overflows in the regularized 1/d: exp(-inf) is
     0 and the weight is 1/d, finite, so neither driver's regularized_inverse
     warns (numpy's 'overflow encountered in multiply' came out by the
-    thousand beside the loop's named flags). A zero denominator is still
-    NaN, warned and flagged by the closed-shell one ('parquet_vertex_pole';
-    the spin-orbital vertices count theirs)."""
+    thousand beside the loop's named flags). An exactly zero denominator is
+    no event either (`test_a_zero_denominator_is_no_event`)."""
     d = np.array([1e160, -1e160, 0.5])
     for regularized_inverse in (restricted_vertices.regularized_inverse,
                                 spin_orbital_two_body.regularized_inverse):
@@ -604,11 +643,181 @@ def test_an_overflowing_denominator_is_no_event():
             weights = regularized_inverse(d, 50.0)
         assert np.isfinite(weights).all(), weights
         assert weights[:2].tolist() == (1.0 / d[:2]).tolist(), weights
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore')
-            assert np.isnan(regularized_inverse(np.zeros(1), 50.0)).all()
-    with pytest.warns(ParquetNotFinite, match='not finite'):
-        restricted_vertices.regularized_inverse(np.zeros(1), 50.0)
+
+
+def srg_weights(d, s):
+    """Every regularized weight (1 - exp(-2 s d^2)) / d of the package at the
+    denominators d, by its function: the vertices' of both drivers, the
+    closed-shell dynamic and static self-energies' and the spin-orbital
+    self-energy's (these three private ones under the IEEE silence their
+    callers hold them in)."""
+    weights = {'restricted_vertices.regularized_inverse':
+               restricted_vertices.regularized_inverse(d, s),
+               'spin_orbital_two_body.regularized_inverse':
+               spin_orbital_two_body.regularized_inverse(d, s)}
+    with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
+        weights['restricted_self_energy._srg_over'] = restricted_self_energy._srg_over(d, s)
+        weights['restricted_static_self_energy._srg_inverse'] = (
+            restricted_static_self_energy._srg_inverse(d, s))
+        weights['spin_orbital_self_energy._reg_inverse'] = (
+            spin_orbital_self_energy._reg_inverse(d, s))
+    return weights
+
+
+def so_slope(d, s):
+    """The slope of a regularized pole, (1 - exp(-2 s d^2)) / d^2, as the
+    spin-orbital self-energy's derivative takes it."""
+    with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
+        return spin_orbital_self_energy._reg_slope(spin_orbital_self_energy._reg_inverse(d, s),
+                                                   d, s)
+
+
+def test_a_zero_denominator_is_no_event():
+    """An exactly zero denominator d (either sign) of a regularized weight
+    (1 - exp(-2 s d^2)) / d, Quack's 0/0, gives the limit 0 at every finite
+    s, in each such weight of the vertices and the self-energies, and the
+    slope of a pole, (1 - exp(-2 s d^2)) / d^2, 0 too, not its limit 2 s;
+    nothing is warned or flagged, and a vertex with a root at omega exactly
+    is finite. Every other d keeps the formula's value to the bit: a few
+    ulps off zero that is 0 for the weight and for the slope, where 1 - exp
+    rounds to 0, so an exact zero gives what one a few ulps off gives. NaN
+    in is NaN out, warned and flagged by the vertices
+    ('parquet_vertex_pole'). At s = inf, the bare 1/d (which the closed-shell
+    vertices and the spin-orbital self-energy accept), a zero d stays a
+    pole: NaN, flagged by the vertices."""
+    zero = np.array([0.0, -0.0])
+    others = np.array([0.7, -ULPS_OFF, ULPS_OFF, 1e-3, -4.0])
+    nan = np.array([np.nan, 0.5])
+    rho = np.arange(16.0).reshape(2, 2, 4) / 16.0
+    for s in ZERO_LIMIT_FLOWS:
+        flags = []
+        with collecting(flags), warnings.catch_warnings():
+            warnings.simplefilter('error')
+            at_zero = srg_weights(zero, s)
+            elsewhere = srg_weights(others, s)
+            # a vertex with a root at omega = 0 exactly, the others away from it
+            om = np.array([0.0, 0.3, -0.0, 0.9])
+            vertices = (restricted_vertices.eh_reducible_vertex(om, rho, s),
+                        restricted_vertices.pp_reducible_vertex(om, rho, -om, rho, s),
+                        spin_orbital_two_body.eh_reducible_vertex_so(om, rho, s),
+                        spin_orbital_two_body.pp_reducible_vertex_so(om, rho, -om, rho, s))
+        assert flags == [], (s, flags)
+        for name, w in at_zero.items():
+            assert np.array_equal(w, np.zeros(2)), (name, s, w)
+        assert np.array_equal(so_slope(zero, s), np.zeros(2)), s
+        assert all(np.isfinite(phi).all() for phi in vertices), s
+        formula = (1.0 - np.exp(-2.0 * s * others * others)) / others
+        for name, w in elsewhere.items():
+            assert w.tobytes() == formula.tobytes(), (name, s, w, formula)
+        assert so_slope(others, s).tobytes() == (formula / others).tobytes(), s
+        # a few ulps off zero the formula's weight and slope are 0, as at an exact zero
+        assert not formula[1:3].any() and not so_slope(others[1:3], s).any(), s
+        flags = []
+        with collecting(flags), warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            at_nan = srg_weights(nan, s)
+            phi = spin_orbital_two_body.eh_reducible_vertex_so(np.array([np.nan, 0.0, 0.3, 0.9]),
+                                                               rho, s)
+        for name, w in at_nan.items():
+            assert np.isnan(w[0]) and np.isfinite(w[1]), (name, s, w)
+        assert np.isnan(so_slope(nan, s)[0]) and np.isnan(phi).all(), s
+        assert [e['flag'] for e in flags] == [events.FLAG_VERTEX_POLE] * 2, (s, flags)
+        assert {w.category for w in caught} == {ParquetNotFinite}, caught
+    flags = []
+    with collecting(flags), warnings.catch_warnings(), np.errstate(invalid='ignore',
+                                                                   divide='ignore'):
+        warnings.simplefilter('ignore')
+        assert np.isnan(restricted_vertices.regularized_inverse(zero, np.inf)).all()
+        assert np.isnan(spin_orbital_self_energy._reg_inverse(zero, np.inf)).all()
+        assert np.isnan(restricted_self_energy._srg_over(zero, np.inf)).all()
+    assert [e['flag'] for e in flags] == [events.FLAG_VERTEX_POLE], flags
+
+
+def synthetic_eri(norb, rng):
+    """<pq|rs> of random real orbitals: (pr|qs) with the eightfold symmetry."""
+    v = rng.standard_normal((norb * norb,) * 2)
+    v = (v + v.T).reshape((norb,) * 4)
+    v = v + v.transpose(1, 0, 2, 3)
+    v = v + v.transpose(0, 1, 3, 2)
+    return np.ascontiguousarray(0.1 * v.transpose(0, 2, 1, 3))
+
+
+def synthetic_problem(driver, om0, seed=7):
+    """(eps, eri, nO, spectra) of four orbitals, two occupied, with random
+    integrals and effective integrals, whose lowest eh root (the closed
+    shell's triplet) is om0, the other roots away from zero; the same draws
+    for every om0."""
+    rng = np.random.default_rng(seed)
+    norb, nO = 4, 2
+    nV = norb - nO
+    eps = np.array([-1.1, -0.6, 0.3, 0.9])
+    eri = synthetic_eri(norb, rng)
+
+    def channel(om):
+        return Channel(np.asarray(om, dtype=float),
+                       0.3 * rng.standard_normal((norb, norb, len(om))))
+
+    eh = np.concatenate(([om0], 0.5 + rng.random(nO * nV - 1)))
+    if driver == 'restricted':
+        singlet = channel(0.4 + rng.random(nO * nV))
+        spectra = RestrictedSpectra(
+            singlet, channel(eh),
+            channel(1.5 + rng.random(pp_pair_count(nV, 'singlet'))),
+            channel(1.6 + rng.random(pp_pair_count(nV, 'triplet'))),
+            channel(-2.5 - rng.random(pp_pair_count(nO, 'singlet'))),
+            channel(-2.4 - rng.random(pp_pair_count(nO, 'triplet'))))
+    else:
+        spectra = SpinOrbitalSpectra(channel(eh),
+                                     channel(1.5 + rng.random(pp_pair_count(nV, 'spin-orbital'))),
+                                     channel(-2.5 - rng.random(pp_pair_count(nO, 'spin-orbital'))))
+    return eps, eri, nO, spectra
+
+
+@pytest.mark.parametrize('driver', ['restricted', 'spin_orbital'])
+def test_a_pole_hit_exactly_weighs_nothing(driver):
+    """A zero eh root (the closed shell's triplet; synthetic spectra) puts
+    the hole pole w - e_j + Omega of orbital j = 0 exactly at w = e_j, where
+    Quack's self-energy is 0/0. There Sigma_jj and dSigma_jj/dw are finite,
+    unflagged and those with that root a few ulps off (AT_ZERO against
+    ULPS_OFF), where Quack's weight and slope round to 0: the pole adds 0 to
+    both, so Z does not depend on how the zero mode rounds. The pole has a
+    residue: with the root NEAR_ZERO off, where the slope nears its limit
+    2 s, the derivative moves by 2 s times it (the closed-shell residue c_k
+    read off), the value an exact zero does not take. The static SRG
+    self-energy of each driver (its kernel K(0, 0) at p = q = j) is finite
+    and the one a few ulps off."""
+    s = 50.0
+    at, static = {}, {}
+    for om0 in AT_ZERO + (ULPS_OFF, NEAR_ZERO):
+        eps, eri, nO, spectra = synthetic_problem(driver, om0)
+        flags = []
+        with collecting(flags), warnings.catch_warnings():
+            warnings.simplefilter('error')
+            if driver == 'restricted':
+                se = restricted_self_energy.DiagonalSelfEnergy(s, eps, eri, nO, spectra)
+                c = se.group_residues('eh_triplet_hole')[se.row(0), 0, 0]
+                at[om0] = se.at(0, eps[0]) + (c,)
+                static[om0] = restricted_static_self_energy.static_self_energy_srg(
+                    s, eps, eri, nO, spectra, n_workers=1)[0]
+            else:
+                se = spin_orbital_self_energy.DiagonalSelfEnergySO(s, eps, eri, nO, spectra)
+                at[om0] = se.at(0, eps[0])
+                static[om0] = spin_orbital_self_energy.static_self_energy_srg_so(
+                    s, eps, eri, nO, spectra)[0]
+        assert flags == [], (driver, om0, flags)
+    sig_ulps, dsig_ulps = at[ULPS_OFF][:2]
+    for om0 in AT_ZERO:
+        sig, dsig = at[om0][:2]
+        assert np.isfinite([sig, dsig]).all(), (om0, at[om0])
+        assert abs(sig - sig_ulps) <= ZERO_SIGMA_REL * abs(sig_ulps), (om0, at)
+        assert abs(dsig - dsig_ulps) <= ZERO_SIGMA_REL * abs(dsig_ulps), (om0, at)
+        assert np.isfinite(static[om0]).all(), (om0, static[om0])
+        assert (np.abs(static[om0] - static[ULPS_OFF]).max()
+                <= ZERO_SIGMA_REL * np.abs(static[ULPS_OFF]).max()), (om0, static)
+    move = at[NEAR_ZERO][1] - dsig_ulps
+    assert abs(move) >= RESIDUE_SEEN * abs(dsig_ulps), at
+    if driver == 'restricted':
+        assert move == pytest.approx(-2.0 * s * at[0.0][2], rel=LIMIT_REL), at
 
 
 def test_the_spin_flip_zero_mode():

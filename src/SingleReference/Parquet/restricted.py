@@ -122,7 +122,11 @@ without their omega argument (an argument-count mismatch, undefined
 behaviour); the static vertices at omega = 0 are built here, as R_evParquet
 builds them. R_qsParquet's failed one-body loop ends the program ('stop');
 here it warns and raises 'parquet_one_body_not_converged', and the result is
-returned. The
+returned. An exactly zero denominator of a regularized weight, where Quack's
+(1 - exp(-2 s d^2)) / d is 0/0 and makes the run NaN, gives the weight its
+limit 0 and the slope in Z 0, the formula's value a few ulps off zero
+(`restricted_vertices.regularized_inverse`, `restricted_self_energy`,
+`restricted_static_self_energy`). The
 plotting blocks of R_evParquet (plot_phi, plot_self) are not ported.
 One occupied or one virtual orbital (nO = 1: H2, He; nV = 1): the triplet pp
 space has no occupied or no virtual pair, and Quack's

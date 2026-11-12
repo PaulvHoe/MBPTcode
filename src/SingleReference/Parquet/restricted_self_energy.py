@@ -55,7 +55,8 @@ ROUNDING. Each frequency-dependent denominator is formed from its energies in
 the order Quack's expression adds them (w + e_a - e_i - e_j in most 2h1p terms,
 w - e_i - e_j + e_a in the second eh term, hence the separate '2h1p_alt'
 family), so every R(w - x) is Quack's to the last bit, also beside a pole,
-where w - x carries a large condition number. Only the terms a pole collects
+where w - x carries a large condition number (on it, w - x exactly zero,
+Quack's is 0/0: ZERO DENOMINATORS below). Only the terms a pole collects
 are summed in another order than Quack sums them, which moves Sigma and its
 derivative in their last bits (1e-15 relative to the sum of the terms'
 magnitudes); Z = 1/(1 - dSigma/dw) magnifies that by Z^2 where dSigma/dw is
@@ -70,6 +71,17 @@ which is not the derivative of the regularized Sigma (that one would add
 c_pk 4 eta exp(-2 eta (w - x)^2)); this is kept. The Galitskii-Migdal
 correlation energy of R_Parquet_self_energy_diag is zero (Quack's EcGM = 0:
 none is computed), and none is returned here.
+
+ZERO DENOMINATORS. Where a denominator D is exactly zero (w on a pole, or a
+frequency-independent Delta that vanishes), Quack's R(D) and its slope
+R(D) / D are 0/0 = NaN, and so is the whole Sigma_pp. Here both are 0 at
+every finite eta (eta = inf, the bare 1/D, keeps its pole): R(0) = 0 is R's
+limit, and the slope 0 is what Quack's own formula gives a few ulps off
+zero, where 1 - exp(-2 eta D^2) rounds to 0 (|D| below 5e-13 at eta = 1e8),
+not the slope's limit 2 eta. A zero mode's pole thus adds the same,
+nothing, to Sigma and to its derivative whether rounding puts the mode at 0
+or a few ulps off. This is the module's one departure from Quack's
+arithmetic, every other denominator being evaluated as Quack writes it.
 
 THE QUASIPARTICLE EQUATION. R_evParquet evaluates the self-energy with every
 denominator on the energies of the previous one-body iteration eOld (the HF
@@ -137,6 +149,8 @@ regularizer: 5 s. Quack's own loops run about 3.6e9 terms, each with two
 exps, per orbital and per self-energy evaluation, 5e11 for the diagonal and as
 many again for every step of Quack's quasiparticle search on every orbital.
 """
+import math
+
 import numpy as np
 
 from src.Base.numerical_flags import flag, flags_into_out
@@ -164,19 +178,25 @@ POLE_GROUPS = ('2h1p', '2h1p_alt', '2p1h',
 #: (2 <pa|ji><ji|pa> - <pa|ji><ji|ap>, Eq. (48) summed over spin).
 SECOND_ORDER_WEIGHTS = {'2d': 2.0, '2x': -1.0}
 
-#: Quack's IEEE arithmetic: a vanishing denominator gives inf or NaN, and an
-#: exp(-2 eta D^2) far below the smallest double gives 0, silently.
+#: Quack's IEEE arithmetic, silently: a vanishing denominator's 0/0 (then
+#: replaced by 0, ZERO DENOMINATORS), inf or NaN from inputs that are not
+#: finite, and an exp(-2 eta D^2) far below the smallest double, 0.
 _IEEE_SILENT = dict(divide='ignore', invalid='ignore', over='ignore', under='ignore')
 
 
 def _srg_over(d, eta):
     """(1 - exp(-2 eta d^2)) / d elementwise (a new array): reg/dem of every
-    Quack denominator, in Quack's order of operations."""
+    Quack denominator, in Quack's order of operations; an exactly zero d
+    gives the limit 0 (ZERO DENOMINATORS)."""
     t = np.multiply(-2.0 * eta, d)
     t *= d
     np.exp(t, out=t)
     np.subtract(1.0, t, out=t)
     t /= d
+    if eta < np.inf:
+        zero = d == 0.0
+        if zero.any():
+            t[zero] = 0.0                   # Quack's 0/0: the limit, 2 eta d -> 0
     return t
 
 
@@ -498,6 +518,7 @@ class DiagonalSelfEnergy:
                                 self.group_residues(f'ee_{spin}'),
                                 self.group_residues(f'hh_{spin}'), hhp, pph)
         self._d, self._r, self._t = np.empty(start), np.empty(start), np.empty(start)
+        self._zero = np.empty(start, dtype=bool)
 
     def group_residues(self, group):
         """The residues of one pole family (a POLE_GROUPS name) as a writable
@@ -518,14 +539,16 @@ class DiagonalSelfEnergy:
         (Hartree): R_Parquet_self_energy_diag_omega's SigC and Z.
 
         The derivative holds the regularizers 1 - exp(-2 eta (w - x)^2)
-        constant, as Quack's does; it is not 1/(1 - ...). One exp per pole;
+        constant, as Quack's does; it is not 1/(1 - ...). A pole hit exactly
+        (w - x_k = 0), Quack's 0/0, adds 0 to Sigma and 0 to the derivative,
+        as that pole a few ulps off does (ZERO DENOMINATORS). One exp per pole;
         the sums over the poles are numpy's pairwise ones, not BLAS dot
         products, whose threads cost more than the sum between the
         elementwise passes of a frequency loop.
         """
         c = self.residues[self.row(p)]
         n3 = self._n3
-        d, r, t = self._d, self._r, self._t
+        d, r, t, zero = self._d, self._r, self._t, self._zero
         with np.errstate(**_IEEE_SILENT):
             np.add(w, self.offsets[0], out=d)
             d += self.offsets[1]
@@ -536,7 +559,16 @@ class DiagonalSelfEnergy:
             np.subtract(1.0, r, out=r)
             r /= d                                  # reg/dem
             sig = np.multiply(c, r, out=t).sum()
+            # an exactly zero d makes its reg/dem 0/0 and so sig NaN: only then are the
+            # zeros looked for and given 0 (ZERO DENOMINATORS), and sig summed again
+            hit = (not math.isfinite(sig) and self.eta < np.inf
+                   and np.equal(d, 0.0, out=zero).any())
+            if hit:
+                r[zero] = 0.0                       # Quack's 0/0: the limit, 2 eta d -> 0
+                sig = np.multiply(c, r, out=t).sum()
             np.divide(r, d, out=t)                  # reg/dem/dem
+            if hit:
+                t[zero] = 0.0                       # Quack's slope a few ulps off zero
             t *= c
             dsig = -t.sum()
         return sig, dsig
@@ -554,8 +586,10 @@ class DiagonalSelfEnergy:
         if bad.any():
             flag(FLAG_SELF_ENERGY_NOT_FINITE,
                  f'the diagonal parquet self-energy is not finite for orbitals '
-                 f'{self.orbitals[bad].tolist()} (0-based): a denominator vanished '
-                 f'exactly, as it does in Quack; the values are returned as computed',
+                 f'{self.orbitals[bad].tolist()} (0-based): an energy, a spectrum or an '
+                 f'integral that is not finite, an overflow, a pole hit at eta = inf (the '
+                 f'bare 1/d), or dSigma/dw exactly 1 (Z = 1/0); the values are returned as '
+                 f'computed',
                  ParquetNotFinite, stacklevel=2)
         return sig, z
 

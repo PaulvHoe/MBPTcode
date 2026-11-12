@@ -235,6 +235,34 @@ WHERE THE PORT DEPARTS FROM QUACK:
   ('parquet_diis_not_finite'), and an exactly singular system (a zero
   pivot), where Quack's weights are undefined, takes the least-squares
   weights (lstsq) instead ('parquet_diis_singular').
+- An exactly zero denominator d of a regularized weight. Quack's
+  (1 - exp(-2 s d^2)) / d is 0/0 there and makes the vertex, the
+  self-energy and every energy NaN; the port gives the weight 0, its limit,
+  and the slope (1 - exp(-2 s d^2)) / d^2 in Z 0 too, the value of Quack's
+  formula a few ulps off zero, where 1 - exp rounds to 0 (the slope's limit,
+  2 s, is not taken), and the static SRG kernel at D_p = D_q = 0 its limit
+  0, in the vertices and the self-energies of both drivers, every other d
+  evaluated as Quack writes it. A zero mode's pole thus adds the same,
+  nothing, whether rounding puts the mode at exactly 0 or a few ulps off:
+  a one-electron system's spin flip (H/STO-3G: e_beta - e_alpha - J, zero
+  in exact arithmetic, 2.2e-16 or exactly 0.0 as the mean-field energies
+  and J round) gives the same numbers either way in the eh TDA. (Without
+  the TDA, phGLR's X + Y = Om^-1/2 Z^T (A - B)^1/2 of a root with
+  A - B = A + B = 0 exactly is 0 times inf, NaN, as in Quack: no
+  regularized weight, kept; a flip rounded below zero makes A - B not
+  positive definite and (A - B)^1/2 NaN, flagged
+  'parquet_eh_a_minus_b_not_positive', as in Quack too.
+  tests/test_parquet_small_systems.py skips its two full-eh H/STO-3G
+  comparisons where the flip comes out at exactly 0.0 or below.) Five runs
+  of the side-by-side comparisons with Quack's Fortran made for the port,
+  outside the test suite, meet such a zero, all over spin orbitals with the
+  full pp problem, whose broken branch is padded with roots at exactly 0
+  (sort_ppRPA), so that omega - Om is 0 in its vertex: H2^-/STO-3G's FLEX
+  and osPA (the eh problem full or in the TDA; its 2h branch) and the H
+  atom's osPA in 6-31G (both problems full; its 2p branch, from the second
+  two-body iteration on). The weight there is 0 where Quack's is NaN, but
+  those runs are NaN anyway, as Quack's are. Quack's own H/STO-3G runs are
+  finite: its flip was off zero.
 - Alpha/beta pairing. For an RHF, run_parquet_so solves each orbital's alpha
   and beta copy once and copies the root (`spin_orbital`); G_evParquet
   solves both, and at large s_1b the two copies, equal only to roundoff, can

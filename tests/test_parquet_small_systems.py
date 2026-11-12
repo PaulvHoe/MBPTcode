@@ -9,11 +9,28 @@ change is -huge, `spin_orbital.EMPTY_MAXVAL`); the numbers are recorded in
 QUACK_SO. The H atom's mean field is the proper UHF, pyscf.scf.uhf.UHF(mol)
 (PySCF's scf.UHF returns its one-electron HF1e there, which drops the
 two-electron terms: the beta 1s comes out degenerate with the occupied alpha
-1s, a 0/0 in both codes); `test_the_h_atom_uhf_is_the_proper_one` holds it to
-the UHF built by hand (alpha F = h + J[Pa] - K[Pa], beta F = h + J[Pa]) of the
-review that found it. H/STO-3G has one eh root, the spin flip, at exactly zero
-in both codes; its full-BSE rows are held as measured and flagged
-'parquet_eh_zero_mode'.
+1s, a 0/0 in Quack's denominators); `test_the_h_atom_uhf_is_the_proper_one`
+holds it to the UHF built by hand (alpha F = h + J[Pa] - K[Pa], beta F = h +
+J[Pa]) of the review that found it. H/STO-3G has one eh root, the spin flip,
+e_beta - e_alpha - J, zero in exact arithmetic: rounding of the mean-field
+energies and J puts it at 2.2e-16 (two ulps of J, as Quack's recorded runs
+had it), at exactly 0.0, or a few ulps below zero. Its full-BSE rows are held
+as measured and flagged 'parquet_eh_zero_mode'; where the flip comes out at
+0.0 or below they are skipped, since the full eh problem has no real
+solution there and the run is NaN, as Quack's would be: at exactly 0.0 its
+X + Y = Om^-1/2 Z^T (A - B)^1/2 is 0 times inf (its eigenvectors carry
+Om^-1/2), and below zero A - B is not positive definite, so (A - B)^1/2 is
+NaN ('parquet_eh_a_minus_b_not_positive'). In the eh TDA the flip forced to
+exactly 0.0 (of either sign), where Quack's regularized 1/d is 0/0, and to
++-1e-16 and +-2.2e-16 gives the run as computed to the bit, in FLEX, osPA
+(by the finder and linearized), evPA and qsPA, the pp problem in the TDA
+and in full: every weight at the zero is 0, its limit, and so is every
+slope in Z, the value Quack's formula gives a few ulps off zero. The
+closed-shell analogue, the lowest triplet forced to 0.0 (a closed shell at
+the edge of its triplet instability), runs in the restricted driver as
+forced to 2.2e-16, to rounding: H2/6-31G, whose zero pole has no residue,
+and LiH/STO-3G, whose pole has one, so that the slope's limit 2 s_1b would
+have moved its linearized energies by mHa.
 
 Closed shells. He/6-31G and H2/6-31G (nO = 1: no triplet hh pair) and
 water/6-31G cut to its six lowest orbitals (nV = 1: no triplet ee pair) run
@@ -42,10 +59,55 @@ from pyscf import ao2mo, gto, scf
 from pyscf.scf import uhf
 
 from src.Base.numerics.constants import PARQUET_VERTEX_DAMPING
-from src.SingleReference.Parquet import restricted, spin_orbital
+from src.SingleReference.Parquet import (restricted, restricted_bse, spin_orbital,
+                                         spin_orbital_two_body)
 
 #: Ha. The mean fields of the Fortran runs.
 SCF_CONV_TOL = 1e-12
+#: Ha. H/STO-3G's spin flip, e_beta - e_alpha - J, where rounding leaves it
+#: two ulps of J off zero (as in Quack's recorded runs; other rounding of the
+#: mean field gives exactly 0.0): a zero mode a few ulps off.
+ULPS_OFF = 2.220446049250313e-16
+#: Ha. The values H/STO-3G's spin flip is forced to: exactly 0 of either
+#: sign and a few ulps off on either side.
+SPIN_FLIP_VALUES = (0.0, -0.0, 1e-16, -1e-16, ULPS_OFF, -ULPS_OFF)
+#: Ha. The eh roots below this are the zero mode the tests force (H/STO-3G's
+#: spin flip; its other roots lie far above).
+ZERO_MODE_BELOW = 1e-12
+#: Ha. A closed shell's lowest triplet forced to 0.0 against it forced to
+#: ULPS_OFF, whose frequency-independent denominators then move by a few
+#: ulps (eqp, eqp_lin and SigC): 1.1e-14 measured (H2's evPA eqp_lin; LiH
+#: 3.3e-16 at most).
+CLOSED_ZERO_MODE_GAP = 1e-12
+#: Z there, absolute: 1.4e-13 (H2) and 1.1e-11 (LiH) measured in evPA, whose
+#: roots at the iterated energies magnify a few ulps of Sigma's slope, 1e-14
+#: at most in FLEX and osPA (bitwise, linearized).
+CLOSED_ZERO_MODE_Z = 1e-9
+#: The runs a zero mode is held through, at s_2b = 1 and the eh TDA: FLEX,
+#: osPA by the default finder and linearized, evPA (the default finder) and
+#: qsPA (the static kernel at D_p = D_q = 0), each with the pp problem in the
+#: TDA and in full ('_pprpa').
+ZERO_MODE_RUNS = {f'{name}{pp}': (scheme, dict(options, **pp_options))
+                  for name, (scheme, options) in (
+                      ('flex', ('flex', {})), ('os', ('os', {})),
+                      ('os_linearized', ('os', {'qp_solver': 'linearized'})),
+                      ('ev', ('ev', {})), ('qs', ('qs', {})))
+                  for pp, pp_options in (('', {}), ('_pprpa', {'tda_pp': False}))}
+#: The closed shells whose lowest triplet is forced: H2/6-31G (CLOSED_SHELLS'
+#: geometry), whose zero pole has no residue (sigma_g -> sigma_u: H2's
+#: inversion parity), and LiH/STO-3G, whose pole has one, so that the slope's
+#: limit 2 s_1b in place of its value a few ulps off, 0, moved the linearized
+#: energies by 1.5 to 2.5 mHa and the linearized Z by 0.17 to 0.18 (FLEX,
+#: osPA, evPA). LiH skips qsPA, whose runs meet no bar from one forced value
+#: to another: its SigC matrix rotates within LiH's degenerate pi pair by
+#: 1e-2 between any two of them, -2.2e-16 against +2.2e-16 (neither an exact
+#: zero) included, a freedom of the degenerate pair, not of the zero:
+#: (geometry, basis, the runs of ZERO_MODE_RUNS it takes).
+FORCED_TRIPLETS = {
+    'h2': ('H 0 0 0; H 0 0 0.74', '6-31g', tuple(ZERO_MODE_RUNS)),
+    'lih': ('Li 0 0 0; H 0 0 1.6', 'sto-3g',
+            tuple(run for run in ZERO_MODE_RUNS if not run.startswith('qs'))),
+}
 #: Ha. Spin-orbital eqp and SigC against Quack: 1e-15 measured (two to four
 #: spin orbitals); x1000 for another BLAS.
 SMALL_EQP = 1e-12
@@ -497,10 +559,43 @@ def flag_names(result):
     return {entry['flag'] for entry in result.numerical_flags}
 
 
+def spin_flip_not_above_zero_without_the_tda(case, options, result):
+    """The skip reason of a case run without the eh TDA whose eh problem met
+    its zero mode at or below zero, or None. H/STO-3G's spin flip, e_beta -
+    e_alpha - J, its one eh root, is zero in exact arithmetic and rounds to
+    ULPS_OFF (as in Quack's recorded runs), to exactly 0.0 or below zero.
+    The full eh problem has no real solution at or below zero, and the run
+    is NaN, as Quack's would be. At exactly 0.0 (of either sign, or an Om^2
+    that underflows) the eigenvectors, which carry Om^-1/2 (X + Y = Om^-1/2
+    Z^T (A - B)^1/2), are 0 times inf, and the run's eh spectrum (its last
+    two-body iteration's) holds the 0.0. Below zero A - B is not positive
+    definite, (A - B)^1/2 and the spectrum are NaN, and the run is flagged
+    'parquet_eh_a_minus_b_not_positive', which a problem of one root owes to
+    that root. Quack's numbers, of the flip a few ulps above zero, are not
+    this run's."""
+    if options.get('tda_eh', True):
+        return None
+    om = np.asarray(result.spectra.eh.om)
+    if np.any(om == 0.0):
+        where = ('at exactly 0.0, where the eigenvectors carry Om^-1/2 '
+                 '(X + Y = Om^-1/2 Z^T (A - B)^1/2), 0 times inf')
+    elif om.size == 1 and 'parquet_eh_a_minus_b_not_positive' in flag_names(result):
+        where = 'below zero, where A - B is not positive definite and (A - B)^1/2 NaN'
+    else:
+        return None
+    return (f'{case}: the spin flip, e_beta - e_alpha - J, came out {where} (the mean-field '
+            f'energies and J rounded it there; Quack\'s recorded run had it at {ULPS_OFF:.1e}). '
+            f'Without the eh TDA the run is NaN, as Quack\'s would be, and has no Quack numbers '
+            f'to meet')
+
+
 @pytest.mark.parametrize('case', sorted(SO_CASES))
 def test_spin_orbital_small_systems_reproduce_quack(case):
     """The H atom, H/STO-3G and H2^-: eqp, SigC, Z, eQPlin, the one-body
-    changes and the counts against G_evParquet and G_qsParquet."""
+    changes and the counts against G_evParquet and G_qsParquet. A case
+    without the eh TDA whose eh problem has its root at exactly 0.0 or below
+    zero (H/STO-3G's spin flip, where rounding can put it) is skipped, with
+    the reason: its run is NaN (`spin_flip_not_above_zero_without_the_tda`)."""
     scheme, options, converged, flags = SO_CASES[case]
     mf, ref = open_shell(case.split('/')[0])
     if scheme == 'qs':
@@ -510,6 +605,9 @@ def test_spin_orbital_small_systems_reproduce_quack(case):
     else:
         eri = spin_orbital.spin_orbital_eri(ref.eri_ao, ref.mo_coeff)
         result = quiet(spin_orbital.ev_parquet_so, ref.eps, eri, ref.nO, scheme, **options)
+    reason = spin_flip_not_above_zero_without_the_tda(case, options, result)
+    if reason:
+        pytest.skip(reason)
     quack = QUACK_SO[case]
     assert result.n_it_1b == quack['n_it_1b'] and result.n_it_2b == quack['n_it_2b'], case
     sigc = result.sigc if result.sigc.ndim == 1 else np.diag(result.sigc)
@@ -542,6 +640,115 @@ def test_the_h_atom_uhf_is_the_proper_one():
     by_hand = np.concatenate(([e_a[0]], np.sort(np.concatenate((e_a[1:], e_b)))))
     assert gap(ref.eps, by_hand) <= UHF_BY_HAND, (ref.eps, by_hand)
     assert ref.nO == 1 and ref.eps[1] - ref.eps[0] > BETA_1S_GAP, ref.eps
+
+
+def spin_flip_at(value):
+    """The spin-orbital driver's eh BSE solver with its roots below
+    ZERO_MODE_BELOW (H/STO-3G's spin flip) put at `value`."""
+    def solve(A, B, tda):
+        solution = spin_orbital_two_body.solve_eh_bse_so(A, B, tda)
+        om = np.where(np.abs(solution.om) < ZERO_MODE_BELOW, value, solution.om)
+        return solution._replace(om=om)
+    return solve
+
+
+def lowest_triplet_at(value):
+    """The closed-shell driver's eh BSE blocks and solver, with the lowest
+    triplet root put at `value` (the blocks tell the solver which spin it
+    solves): (blocks, solve)."""
+    spins = []
+
+    def blocks(eps, eri, nO, spin, tda):
+        spins.append(spin)
+        return restricted_bse.eh_bse_blocks(eps, eri, nO, spin, tda)
+
+    def solve(A, B, tda):
+        om, xpy, xmy, ec = restricted_bse.solve_eh_bse(A, B, tda)
+        if spins.pop() == 'triplet':
+            om = om.copy()
+            om[0] = value
+        return om, xpy, xmy, ec
+    return blocks, solve
+
+
+def assert_same_run(got, want, label, bar, z_bar):
+    """Two parquet runs finite, with the same flags, and equal to `bar` in
+    eqp, eqp_lin and SigC and to `z_bar` in Z (None: to the bit)."""
+    assert flag_names(got) == flag_names(want), (label, flag_names(got), flag_names(want))
+    for key in ('eqp', 'eqp_lin', 'sigc', 'z'):
+        a, b = getattr(got, key), getattr(want, key)
+        if b is None:
+            assert a is None, (label, key)
+            continue
+        assert np.isfinite(a).all() and np.isfinite(b).all(), (label, key, a, b)
+        limit = z_bar if key == 'z' else bar
+        if limit is None:
+            assert np.asarray(a).tobytes() == np.asarray(b).tobytes(), (label, key, a, b)
+        else:
+            assert gap(a, b) <= limit, (label, key, gap(a, b))
+
+
+@pytest.mark.parametrize('run', sorted(ZERO_MODE_RUNS))
+def test_the_spin_flip_at_exactly_zero(run, monkeypatch):
+    """H/STO-3G's spin flip is an exact zero that rounding puts at 2.2e-16 or
+    at exactly 0.0, where Quack's regularized 1/d is 0/0 and made the whole
+    run NaN. Forced to each of SPIN_FLIP_VALUES (exactly 0.0 of either sign,
+    +-1e-16, +-ULPS_OFF), run_parquet_so (s_2b = 1, the eh TDA by default)
+    gives the run as computed to the bit: finite, unflagged, the same eqp,
+    eqp_lin, SigC and Z. Every weight at the zero is 0, its limit, as a few
+    ulps off, where 1 - exp rounds to 0, and so is every slope in Z, the
+    value of Quack's formula there (the flip's residues vanish as well:
+    Sigma = 0 and Z = 1)."""
+    scheme, options = ZERO_MODE_RUNS[run]
+    mf, _ = open_shell('h_sto')
+    computed = quiet(spin_orbital.run_parquet_so, mf, scheme, eta_2b=1.0, **options)
+    assert abs(computed.spectra.eh.om[0]) < ZERO_MODE_BELOW, computed.spectra.eh.om
+    for value in SPIN_FLIP_VALUES:
+        with monkeypatch.context() as patch:
+            patch.setattr(spin_orbital, 'solve_eh_bse_so', spin_flip_at(value))
+            forced = quiet(spin_orbital.run_parquet_so, mf, scheme, eta_2b=1.0, **options)
+        assert forced.spectra.eh.om.tobytes() == np.array([value]).tobytes(), (run, value)
+        assert not flag_names(forced), (run, value, flag_names(forced))
+        assert_same_run(forced, computed, (run, value), None, None)
+
+
+@functools.lru_cache(maxsize=None)
+def forced_triplet_rhf(name):
+    """The RHF of a FORCED_TRIPLETS closed shell."""
+    atom, basis, _ = FORCED_TRIPLETS[name]
+    mf = scf.RHF(gto.M(atom=atom, basis=basis, verbose=0))
+    mf.conv_tol = SCF_CONV_TOL
+    mf.kernel()
+    assert mf.converged
+    return mf
+
+
+@pytest.mark.parametrize('name, run', [(name, run) for name in sorted(FORCED_TRIPLETS)
+                                       for run in sorted(FORCED_TRIPLETS[name][2])])
+def test_a_closed_shells_triplet_at_exactly_zero(name, run, monkeypatch):
+    """The closed-shell analogue: a closed shell has no zero mode of its own,
+    but at the edge of its triplet instability its lowest triplet goes to
+    zero. Forced to exactly 0.0, it runs through run_parquet (s_2b = 1)
+    finite, with the flags of the run with it forced to ULPS_OFF and its eqp,
+    eqp_lin, SigC and Z to rounding (the bosonic denominators move by a few
+    ulps). H2's zero pole has no residue (sigma_g -> sigma_u: inversion
+    parity); LiH's has one, and its derivative at the pole takes 0, the
+    value of Quack's slope a few ulps off, so its Z and eqp_lin stay those of
+    the triplet a few ulps off, where the slope's limit 2 s_1b times the
+    residue would move them by up to 0.18 and 2.5 mHa
+    (`test_parquet_flags.py::test_a_pole_hit_exactly_weighs_nothing`)."""
+    scheme, options = ZERO_MODE_RUNS[run]
+    results = {}
+    for value in (0.0, ULPS_OFF):
+        blocks, solve = lowest_triplet_at(value)
+        with monkeypatch.context() as patch:
+            patch.setattr(restricted, 'eh_bse_blocks', blocks)
+            patch.setattr(restricted, 'solve_eh_bse', solve)
+            results[value] = quiet(restricted.run_parquet, forced_triplet_rhf(name), scheme,
+                                   eta_2b=1.0, **options)
+        assert results[value].spectra.eh_triplet.om[0] == value, (name, run, value)
+    assert_same_run(results[0.0], results[ULPS_OFF], (name, run), CLOSED_ZERO_MODE_GAP,
+                    CLOSED_ZERO_MODE_Z)
 
 
 def test_an_empty_change_is_gfortrans_maxval():

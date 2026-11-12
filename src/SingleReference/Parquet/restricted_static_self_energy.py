@@ -79,9 +79,17 @@ occupied orbitals first, no frozen core or virtuals. The spectra are a
 `spectra.RestrictedSpectra`; rho[p, q, n] is Quack's rho(p, q, n) (the eh
 `eh_sing_rho`, the pp `ee_sing_rho` and `hh_sing_rho`, ...), om its
 eigenvalues. Every array is indexed as Quack's (0-based), and the result
-matches Quack's SigC element by element; where Quack's formula has an exact
-0/0 (a denominator exactly zero) it gives NaN, as Quack does, and the named
-flag 'parquet_static_sigma_not_finite' is raised (`events.ParquetNotFinite`).
+matches Quack's SigC element by element, but where Quack's SRG formula has an
+exact 0/0: a denominator exactly zero gives the limit, R(0) = 0 and
+K(0, 0) = 0 (at D_p^2 + D_q^2 = 0), where Quack's is NaN, so a zero mode
+weighs nothing whether rounding puts it at 0 or a few ulps off. The eta
+form's x / (x^2 + eta^2) is 0 at x = 0 for every eta whose square does not
+underflow (eta above about 1.6e-162 Ha), and 0/0 there, as in Quack, at
+eta = 0, its unregularized limit (which the drivers refuse), and at an eta
+below that bound (which they take: their broadening is any finite eta > 0).
+An element that is not finite (an input that is not finite, an overflow, or
+that pole of the eta form) raises the named flag
+'parquet_static_sigma_not_finite' (`events.ParquetNotFinite`).
 """
 import numpy as np
 
@@ -275,8 +283,16 @@ def static_self_energy_eta(eta, eps, eri, nO, spectra):
 # --------------------------------------------------------------------------
 
 def _srg_inverse(d, eta):
-    """R(d) = (1 - exp(-2 eta d^2)) / d, Quack's reg1/dem1 (NaN at d = 0)."""
-    return (1.0 - np.exp(-2.0 * eta * d * d)) / d
+    """R(d) = (1 - exp(-2 eta d^2)) / d, Quack's reg1/dem1; at d = 0 exactly
+    its limit 0, where Quack's is 0/0 (eta is finite here, `_checked`; inf,
+    the bare 1/d, would keep its pole)."""
+    zero = d == 0.0
+    if not (eta < np.inf and zero.any()):
+        return (1.0 - np.exp(-2.0 * eta * d * d)) / d
+    with np.errstate(divide='ignore', invalid='ignore'):
+        r = (1.0 - np.exp(-2.0 * eta * d * d)) / d
+    r[zero] = 0.0                           # Quack's 0/0: the limit, 2 eta d -> 0
+    return r
 
 
 def _srg_pair_sum(sig, eps, shift, left, right, eta, workers):
@@ -285,7 +301,8 @@ def _srg_pair_sum(sig, eps, shift, left, right, eta, workers):
     K(a, b) = (a + b) / (a^2 + b^2) (1 - exp(-eta (a^2 + b^2))), Quack's
     reg2 (dem2_p + dem2_q) / dem2_pq, evaluated exactly for every (p, q, x)
     with exp(-eta (a^2 + b^2)) = exp(-eta a^2) exp(-eta b^2): seven passes
-    over (q, x) per row p. The rows p run over `workers` threads; each
+    over (q, x) per row p; where a^2 + b^2 is exactly zero (Quack's 0/0) K is
+    its limit 0. The rows p run over `workers` threads; each
     thread takes the configurations in blocks, forms a block's per-q factors
     once and runs all its rows over it while it is in cache. A row is summed
     over the blocks in one order whichever thread runs it, so the split
@@ -308,12 +325,16 @@ def _srg_pair_sum(sig, eps, shift, left, right, eta, workers):
             r = right[:, x0:x1]
             np.add(eps[:, None], shift[None, x0:x1], out=d)        # eps_q + shift_x
             np.multiply(d, d, out=d2)
+            zeros = eta < np.inf and not d2.all()   # a^2 + b^2 = 0 can occur in this block
             np.multiply(d2, -eta, out=damp)
             np.exp(damp, out=damp)
             np.multiply(r, damp, out=damped)
             for p in range(p0, p1):
                 np.add(d2, d2[p], out=s)                            # a^2 + b^2
                 np.add(d, d[p], out=t)                              # a + b
+                if zeros:
+                    hit = s == 0.0                                  # Quack's 0/0: K's limit 0
+                    s[hit], t[hit] = 1.0, 0.0
                 np.divide(t, s, out=t)
                 np.multiply(damped, damp[p], out=s)
                 np.subtract(r, s, out=s)                            # right (1 - e^-eta(a^2+b^2))
@@ -619,6 +640,8 @@ def _flag_not_finite(sig, where):
     if bad.any():
         flag(FLAG_STATIC_SIGMA_NOT_FINITE,
              f'{where}: {int(bad.sum())} of {sig.size} elements of the static parquet '
-             f'self-energy are not finite (a denominator of Quack\'s formula is exactly '
-             f'zero, or a spectrum is not finite); returned as computed',
+             f'self-energy are not finite (an energy, a spectrum or an integral that is '
+             f'not finite, an overflow, or a zero denominator of the eta form at a '
+             f'broadening whose square is 0: eta = 0, its unregularized limit, or below '
+             f'about 1.6e-162 Ha); returned as computed',
              ParquetNotFinite, stacklevel=3)

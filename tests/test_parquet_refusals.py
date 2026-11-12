@@ -29,7 +29,8 @@ scheme, both levels:
   drivers), one the spin-orbital driver cannot put on both spin blocks (of
   another shape, or a GHF's that depends on the spin; osPA does not read
   it), and a reference whose orbital space Quack's canonical
-  orthogonalization would shrink;
+  orthogonalization would shrink (skipped under a PySCF without the switch
+  that makes one, as 2.12.1; CI pins 2.13.1);
 * the vertex hook's outputs, checked as each vertex comes back (the first
   at the first two-body iteration, after its BSEs and effective integrals,
   before any damping or DIIS): another shape (at the first vertex or a
@@ -577,8 +578,15 @@ def test_a_space_quacks_orthogonalization_would_shrink(driver, monkeypatch):
     H has an overlap eigenvalue of 5.3e-7, below
     PARQUET_ORTHOGONALIZATION_THRESHOLD; PySCF told to keep it (its own
     remove_overlap_zero_eigenvalue switch) gives an RHF with three orbitals,
-    which the front doors refuse before any two-electron integral."""
+    which the front doors refuse before any two-electron integral. A PySCF
+    without that switch (2.12.1 has none; 2.13.0 has it) skips the test:
+    CI pins pyscf 2.13.1 (tools/ci/pinned.txt)."""
+    import pyscf
     import pyscf.scf.hf as pyscf_hf
+    if not hasattr(pyscf_hf, 'remove_overlap_zero_eigenvalue'):
+        pytest.skip(f'pyscf {pyscf.__version__} has no pyscf.scf.hf.'
+                    f'remove_overlap_zero_eigenvalue, the switch this test sets; CI pins '
+                    f'pyscf 2.13.1 (tools/ci/pinned.txt)')
     mol = gto.M(atom='H 0 0 0; H 0 0 0.74; ghost-H 0 0 0.741', basis='sto-3g', verbose=0)
     with monkeypatch.context() as patch:
         patch.setattr(pyscf_hf, 'remove_overlap_zero_eigenvalue', False)
@@ -593,6 +601,17 @@ def test_a_space_quacks_orthogonalization_would_shrink(driver, monkeypatch):
     front = restricted.run_parquet if driver == 'restricted' else spin_orbital.run_parquet_so
     with pytest.raises(ValueError, match="canonical orthogonalization keeps 2 functions"):
         front(mf, 'qs')
+
+
+def test_without_pyscfs_switch_the_orthogonalization_test_skips(monkeypatch):
+    """Where pyscf.scf.hf has no remove_overlap_zero_eigenvalue (pyscf
+    2.12.1; deleted here), test_a_space_quacks_orthogonalization_would_shrink
+    skips before it builds anything, its reason naming CI's pyscf pin."""
+    import pyscf.scf.hf as pyscf_hf
+    monkeypatch.delattr(pyscf_hf, 'remove_overlap_zero_eigenvalue', raising=False)
+    for driver in ('restricted', 'spin_orbital'):
+        with pytest.raises(pytest.skip.Exception, match=r'CI pins pyscf 2\.13\.1'):
+            test_a_space_quacks_orthogonalization_would_shrink(driver, monkeypatch)
 
 
 def test_a_spin_dependent_core_hamiltonian(monkeypatch):

@@ -18,7 +18,9 @@ branch. docs/warnings.md has a row for each.
                           reference that was not converged;
     ParquetNotFinite      a quantity came out NaN or infinite, or the
                           arithmetic met an exact zero where Quack's has no
-                          defined value (a vertex denominator, a DIIS pivot);
+                          defined value (a DIIS pivot; an exactly zero
+                          denominator of a regularized weight is no event:
+                          the weight and its slope are 0);
     ParquetBSEUnstable    an eh or pp Bethe-Salpeter problem is unstable or
                           its diagonalization failed (Quack's printed BSE
                           warnings, and two events it lets pass without a
@@ -55,9 +57,11 @@ class ParquetNotFinite(RuntimeWarning):
     change, a DIIS history, the qsPA Fock matrix, a BSE matrix, a
     self-energy, a quasiparticle energy a qp_solver function returned), or
     the arithmetic met an exact zero
-    where Quack's result is undefined or NaN (a reducible-vertex denominator,
-    a pivot of the DIIS system). The values are returned as computed; the
-    named flag says which event."""
+    where Quack's result is undefined (a pivot of the DIIS system). The
+    values are returned as computed; the named flag says which event. An
+    exactly zero denominator of a regularized weight, Quack's 0/0, is no
+    event: the weight is 0, its limit, and so is a pole's slope, the value of
+    Quack's formula a few ulps off zero."""
 
 
 class ParquetBSEUnstable(RuntimeWarning):
@@ -95,16 +99,26 @@ FLAG_DIIS_SINGULAR = 'parquet_diis_singular'
 FLAG_QS_FOCK_NOT_FINITE = 'parquet_qs_fock_not_finite'
 #: ParquetNotFinite: NaN or inf entered a BSE diagonalization.
 FLAG_BSE_NOT_FINITE = 'parquet_bse_not_finite'
-#: ParquetNotFinite: the diagonal self-energy or its derivative is not finite.
+#: ParquetNotFinite: the diagonal self-energy or its derivative is not finite:
+#: an input that is not finite, an overflow, a pole hit at eta = inf (the
+#: bare 1/d), or, in the closed-shell diagonal, dSigma/dw exactly 1 (Z =
+#: 1/0). A regularized term whose denominator is exactly zero is 0, its
+#: slope too, and no event.
 FLAG_SELF_ENERGY_NOT_FINITE = 'parquet_self_energy_not_finite'
-#: ParquetNotFinite: the static (qsPA) self-energy matrix is not finite.
+#: ParquetNotFinite: the static (qsPA) self-energy matrix is not finite: an
+#: input that is not finite, an overflow, or an unregularized form at a zero
+#: denominator (the SRG form at eta = inf, which the drivers refuse; the eta
+#: form at a broadening whose square underflows to 0, below about 1.6e-162
+#: Ha, which they take, or at 0, which they refuse).
 FLAG_STATIC_SIGMA_NOT_FINITE = 'parquet_static_sigma_not_finite'
 #: ParquetNotFinite: a qp_solver function returned a quasiparticle energy that
 #: is not finite (`options.flag_qp_solution`).
 FLAG_QP_NOT_FINITE = 'parquet_qp_not_finite'
-#: ParquetNotFinite: a reducible-vertex weight is not finite, its denominator
-#: omega -+ Omega exactly zero or an energy NaN (both branches test the
-#: weights); the vertex is NaN there.
+#: ParquetNotFinite: a reducible-vertex weight is not finite: an energy (or
+#: omega) that is not finite (both branches test the weights); the vertex is
+#: NaN there. A denominator omega -+ Omega exactly zero is no event: its
+#: weight is the limit 0 (at eta = inf, the bare 1/d, which the closed-shell
+#: weight accepts but no driver, it stays a pole and is flagged).
 FLAG_VERTEX_POLE = 'parquet_vertex_pole'
 #: ParquetNotFinite: a vertex_builder other than the default returned a
 #: reducible vertex holding NaN or inf (counted before the damping); the loop

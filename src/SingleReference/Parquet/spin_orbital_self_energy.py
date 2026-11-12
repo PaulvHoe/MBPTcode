@@ -67,6 +67,19 @@ this is kept. G_Parquet_self_energy_diag's EcGM is always 0 (no Galitskii-
 Migdal energy is computed; G_evParquet's call of G_Parquet_Galitskii_Migdal
 is commented out), and none is returned here.
 
+ZERO DENOMINATORS. Where a denominator D is exactly zero (w on a pole, or a
+zero mode in a frequency-independent one: H/STO-3G's spin flip at
+w = eps[p]), Quack's R(D) and its slope (1 - exp(-2 eta D^2)) / D^2 are
+0/0 = NaN, and so is the whole Sigma_pp. Here R(0), the slope and the
+static kernel K(0, 0) are 0 at every finite eta (eta = inf, the bare 1/D,
+keeps its pole): R(0) = 0 and K(0, 0) = 0 are the limits, and the slope 0
+is what Quack's own formula gives a few ulps off zero, where
+1 - exp(-2 eta D^2) rounds to 0 (|D| below 5e-13 at eta = 1e8), not the
+slope's limit 2 eta. A zero mode's pole thus adds the same, nothing, to
+Sigma and to its derivative whether rounding puts the mode at 0 or a few
+ulps off. This is the module's one departure from Quack's arithmetic, every
+other denominator being evaluated as Quack writes it.
+
 THE STATIC MATRIX (qsPA). G_Parquet_self_energy_SRG_dp builds Sigma~_pq from
 the same thirteen terms. In each, the integral is orbital p's, the second
 amplitude orbital q's (rho_qj,n, rho_jq,n, rho_bq,n, rho_qb,n, ee_qc,m,
@@ -182,10 +195,31 @@ class _Term(NamedTuple):
     a_pole: object = None
 
 
-def _reg_inverse(d, eta):
+def _reg_inverse(d, eta, zeros=True):
     """(1 - exp(-2 eta d^2)) / d, Quack's reg/dem, as Quack writes it (1 -
-    exp, not expm1)."""
-    return (1.0 - np.exp(-SRG_EXPONENT_FACTOR * eta * d * d)) / d
+    exp, not expm1); at d = 0 exactly 0, its limit (ZERO DENOMINATORS), with
+    zeros True, or Quack's 0/0 with zeros False
+    (`DiagonalSelfEnergySO._evaluate`)."""
+    g = (1.0 - np.exp(-SRG_EXPONENT_FACTOR * eta * d * d)) / d
+    return _zero_at_zero(g, d, eta) if zeros else g
+
+
+def _reg_slope(g, d, eta, zeros=True):
+    """Quack's slope of a regularized pole, g / d = (1 - exp(-2 eta d^2)) / d^2
+    for g = _reg_inverse(d, eta), computed in g (in place); at d = 0 exactly
+    0, the formula's value a few ulps off zero, not its limit 2 eta (ZERO
+    DENOMINATORS), or Quack's 0/0 with zeros False."""
+    g /= d
+    return _zero_at_zero(g, d, eta) if zeros else g
+
+
+def _zero_at_zero(values, d, eta):
+    """`values`, computed elementwise from the denominators d, set to 0 (in
+    place) where d is exactly zero, Quack's 0/0, at every finite eta
+    (eta = inf, the bare 1/d, keeps its pole: NaN)."""
+    if eta < np.inf and not np.all(d):
+        values[d == 0.0] = 0.0
+    return values
 
 
 def _checked(eta, eps, eri, nO, spectra):
@@ -291,10 +325,11 @@ def _contract(x, m):
     return out
 
 
-def _contracted_side(term, w, eta, poles, derivative):
+def _contracted_side(term, w, eta, poles, derivative, zeros=True):
     """sum_L a[p, r, L] R(D_a[p, r, L]) m[L, c] of a product term at the
     frequencies w (one per orbital): shape (P, R, C), and with derivative
-    also the same with R(D)/D, stacked first, shape (2, P, R, C)."""
+    also the same with R(D)/D, stacked first, shape (2, P, R, C). zeros as
+    for _reg_inverse."""
     a, m = term.a, term.m
     P, R = a.shape[:2]
     per = R * int(np.prod(a.shape[2:]))
@@ -304,8 +339,11 @@ def _contracted_side(term, w, eta, poles, derivative):
     for blk in _row_blocks(P, k * per, PARQUET_SO_PRODUCT_BLOCK_ELEMENTS):
         ab = a[blk]
         d = _delta(w[blk], poles[term.a_pole]).reshape(ab.shape)
-        g = _reg_inverse(d, eta)
-        x = np.stack((ab * g, ab * (g / d))) if derivative else (ab * g)[None]
+        g = _reg_inverse(d, eta, zeros)
+        x = ab * g
+        # the slope g / d in g itself, once ab * g is taken
+        x = (np.stack((x, ab * _reg_slope(g, d, eta, zeros))) if derivative
+             else x[None])
         nb = ab.shape[0]
         out[:, blk] = _contract(x.reshape((k * nb * R,) + ab.shape[2:]),
                                 m).reshape(k, nb, R, ncol)
@@ -507,9 +545,10 @@ class DiagonalSelfEnergySO:
                     self._simple.append((term.part, term.column, term.pole,
                                          term.x * term.y))
 
-    def _parts(self, w):
+    def _parts(self, w, zeros=True):
         """Quack's decomposition at the frequencies w (one per orbital):
-        part name -> (sig, dsig), each (len(w), ncol)."""
+        part name -> (sig, dsig), each (len(w), ncol). zeros as for
+        _reg_inverse."""
         w = np.asarray(w, dtype=float)
         if w.shape != self.orbitals.shape:
             raise ValueError(f'w has shape {w.shape}: one frequency per orbital, '
@@ -526,9 +565,9 @@ class DiagonalSelfEnergySO:
                 for blk in _row_blocks(P, 3 * npole):
                     rb = res[blk].reshape(blk.stop - blk.start, npole)
                     d = _delta(w[blk], self._poles[pole]).reshape(rb.shape)
-                    g = _reg_inverse(d, self.eta)
+                    g = _reg_inverse(d, self.eta, zeros)
                     sig[blk, column] = np.einsum('pk,pk->p', rb, g)
-                    g /= d
+                    g = _reg_slope(g, d, self.eta, zeros)
                     dsig[blk, column] = -np.einsum('pk,pk->p', rb, g)
             for term in self._product:
                 sig, dsig = parts[term.part]
@@ -536,19 +575,34 @@ class DiagonalSelfEnergySO:
                 per = 2 * R * int(np.prod(term.a.shape[2:])) + 4 * R * C
                 for blk in _row_blocks(P, per, PARQUET_SO_PRODUCT_BLOCK_ELEMENTS):
                     t = _contracted_side(term._replace(a=term.a[blk]), w[blk], self.eta,
-                                         self._poles, derivative=True)
+                                         self._poles, derivative=True, zeros=zeros)
                     t *= term.y[blk]
                     d = _delta(w[blk], self._poles[term.pole])
-                    g = _reg_inverse(d, self.eta)
+                    g = _reg_inverse(d, self.eta, zeros)
                     sig[blk, term.column] = np.einsum('prc,prc->p', t[0], g)
                     dsig[blk, term.column] = -np.einsum('prc,prc->p', t[1], g)
-                    g /= d
+                    g = _reg_slope(g, d, self.eta, zeros)
                     dsig[blk, term.column] -= np.einsum('prc,prc->p', t[0], g)
         return parts
 
     def _evaluate(self, w):
-        """(sig, dsig, parts) at the frequencies w, summed as Quack sums SigC."""
-        parts = self._parts(w)
+        """(sig, dsig, parts) at the frequencies w, summed as Quack sums SigC.
+
+        Quack's formulas first, without the zero denominators' values (no
+        test for an exact zero per term); an exactly zero denominator makes
+        its weight 0/0 and so the sums NaN, and only then is everything
+        evaluated again with its weight and slope 0 (ZERO DENOMINATORS): the
+        same numbers as with those zeros taken throughout, at the cost of
+        the zero tests only where a sum came out not finite."""
+        sig, dsig, parts = self._summed(w, zeros=False)
+        if not (np.isfinite(sig).all() and np.isfinite(dsig).all()):
+            sig, dsig, parts = self._summed(w, zeros=True)
+        return sig, dsig, parts
+
+    def _summed(self, w, zeros):
+        """(sig, dsig, parts) of `_parts` at the frequencies w, the parts
+        summed as Quack sums SigC."""
+        parts = self._parts(w, zeros)
         sig2, dsig2 = parts['sig_2']
         sig, dsig = sig2[:, 0] + sig2[:, 1], dsig2[:, 0] + dsig2[:, 1]
         for name in ('sig_eh', 'sig_pp'):
@@ -625,13 +679,14 @@ def _flag_not_finite(values, name, where):
     """Warn `events.ParquetNotFinite` and raise the named flag `name`
     ('parquet_self_energy_not_finite' for the diagonal,
     'parquet_static_sigma_not_finite' for the static matrix) if values hold a
-    NaN or an inf: a denominator vanished exactly (Quack's reg/dem is 0/0
-    there too) or a spectrum is not finite."""
+    NaN or an inf: an energy, a spectrum or an integral that is not finite, an
+    overflow, or a pole hit at eta = inf (an exactly zero denominator of a
+    regularized term gives it 0 and is no event: ZERO DENOMINATORS)."""
     bad = ~np.isfinite(values)
     if bad.any():
-        flag(name, f'{where}: {int(bad.sum())} of {bad.size} values are not finite (a '
-                   f'denominator of Quack\'s formula is exactly zero, or a spectrum is not '
-                   f'finite); returned as computed',
+        flag(name, f'{where}: {int(bad.sum())} of {bad.size} values are not finite (an '
+                   f'energy, a spectrum or an integral that is not finite, an overflow, or a '
+                   f'pole hit at eta = inf, the bare 1/d); returned as computed',
              ParquetNotFinite, stacklevel=3)
 
 
@@ -716,7 +771,8 @@ def _kernel_sum(sig, d, pairs, eta):
     chunk's columns of d and of every factor copied out once, so they stay in
     cache while
     every orbital p takes its rows q >= p; exp(-eta (d_p^2 + d_q^2)) is the
-    product of the two orbitals' exp(-eta d^2).
+    product of the two orbitals' exp(-eta d^2). Where d_p^2 + d_q^2 is
+    exactly zero (Quack's 0/0) K is its limit 0, at every finite eta.
     """
     norb = d.shape[0]
     d = d.reshape(norb, -1)
@@ -729,6 +785,8 @@ def _kernel_sum(sig, d, pairs, eta):
         dk = np.ascontiguousarray(d[:, ks])
         ek = np.exp(-eta * dk * dk)
         d2k = dk * dk
+        # d_p^2 + d_q^2 = 0 can occur in this chunk (eta = inf, the bare kernel, keeps it NaN)
+        zeros = eta < np.inf and not d2k.all()
         xk = [np.ascontiguousarray(x[:, ks]) for x in xs]
         yk = [np.ascontiguousarray(y[:, ks]) for y in ys]
         f, s, t = np.empty(dk.shape), np.empty(dk.shape), np.empty(dk.shape)
@@ -741,6 +799,9 @@ def _kernel_sum(sig, d, pairs, eta):
             np.add(dk[p], dk[p:], out=sv)
             fv *= sv
             np.add(d2k[p], d2k[p:], out=sv)
+            if zeros:
+                hit = sv == 0.0                     # Quack's 0/0: K's limit 0
+                sv[hit], fv[hit] = 1.0, 0.0
             fv /= sv
             for x, y in zip(xk, yk):
                 np.multiply(fv, y[p:], out=tv)

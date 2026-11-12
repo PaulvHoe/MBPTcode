@@ -137,13 +137,15 @@ relative on random entries at norb 41, as the whole product moves between 1
 and 2 threads). Another BLAS may round any block differently in the last
 bit.
 
-Quack's own behaviour, kept: a denominator omega -+ Omega that vanishes
-exactly gives 0/0 = NaN in the whole vertex, as in Quack (warned about,
-`events.ParquetNotFinite`, and flagged here, 'parquet_vertex_pole', as a NaN
-energy is);
-1 - exp(-x) is evaluated as written,
-not as -expm1(-x); the singlet pair norm is Quack's literal
-0.7071067811865475d0, which is 1/np.sqrt(2.0) bitwise (`pp_pair_norm`).
+Quack's own behaviour, kept: 1 - exp(-x) is evaluated as written, not as
+-expm1(-x); the singlet pair norm is Quack's literal 0.7071067811865475d0,
+which is 1/np.sqrt(2.0) bitwise (`pp_pair_norm`). Departed from: a
+denominator omega -+ Omega that vanishes exactly, where Quack's
+(1 - exp(-2 eta d^2)) / d is 0/0 = NaN in the whole vertex, gives the
+weight's limit 0 (`regularized_inverse`), so a zero mode weighs nothing
+whether rounding puts it at 0 or a few ulps off; a weight that is not
+finite (a NaN energy) makes the vertex NaN, as in Quack, warned about
+(`events.ParquetNotFinite`) and flagged, 'parquet_vertex_pole'.
 Where Quack's closed-shell code may give no number, both cases are
 accepted: with one occupied orbital (H2, He; nO = 1) the triplet pp space has
 no occupied pair, and with one virtual orbital (nV = 1, water/6-31G cut to
@@ -359,13 +361,17 @@ def regularized_inverse(d, eta):
 
     The regulator of every reducible vertex (R_*_Phi, Eq. (52) at omega = 0).
     It vanishes for eta = 0 and tends to 1/d as eta grows. An exactly zero d
-    gives 0/0 = NaN, as Quack's (rho rho / d)(1 - exp(-2 eta d^2)) does, and
-    a NaN d (a NaN energy) gives NaN; every weight that is not finite is
-    warned about (`events.ParquetNotFinite`) and flagged
-    ('parquet_vertex_pole'), as the spin-orbital vertices count theirs. A
-    d so large that d^2 overflows (|d| above about 1e154 Ha, eigenvalues of a
-    diverging two-body loop) gives exp(-inf) = 0 and the finite 1/d, without
-    a warning.
+    gives the limit 0 (the weight is 2 eta d to first order) at every finite
+    eta, where Quack's (rho rho / d)(1 - exp(-2 eta d^2)) is 0/0 = NaN: the
+    port departs from Quack there alone, so that a zero mode weighs nothing
+    whether rounding puts it at 0 or a few ulps off (where 1 - exp rounds to
+    0). Every other d is evaluated by the formula as written. At eta = inf,
+    the bare 1/d, a zero d stays a pole (NaN). A NaN d (a NaN energy) gives
+    NaN; every weight that is not finite is warned about
+    (`events.ParquetNotFinite`) and flagged ('parquet_vertex_pole'), as the
+    spin-orbital vertices count theirs. A d so large that d^2 overflows (|d|
+    above about 1e154 Ha, eigenvalues of a diverging two-body loop) gives
+    exp(-inf) = 0 and the finite 1/d, without a warning.
 
     Parameters
     ----------
@@ -386,12 +392,16 @@ def regularized_inverse(d, eta):
     # flagged below
     with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
         w = (1.0 - np.exp(-2.0 * eta * d * d)) / d
+    if eta < np.inf:
+        zero = d == 0.0
+        if zero.any():
+            w = np.where(zero, 0.0, w)      # Quack's 0/0: the limit, 2 eta d -> 0
     poles = int(np.count_nonzero(~np.isfinite(w)))
     if poles:
         flag(FLAG_VERTEX_POLE,
-             f'{poles} reducible-vertex weight(s) not finite (a denominator omega -+ '
-             'Omega that vanishes exactly, 0/0, or a NaN energy): the vertex is NaN '
-             'there, as in Quack', ParquetNotFinite)
+             f'{poles} reducible-vertex weight(s) not finite (an energy that is not '
+             'finite, or a zero denominator at eta = inf, the bare 1/d): the vertex is '
+             'NaN there, as in Quack', ParquetNotFinite)
     return w
 
 

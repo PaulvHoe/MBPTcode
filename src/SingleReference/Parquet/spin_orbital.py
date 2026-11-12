@@ -158,6 +158,15 @@ WHAT IS QUACK'S AND KEPT, oddities included:
 - Quack's main program (GQuAcK) runs G_evParquet_v2 for evParquet, which
   mixes and extrapolates the BSE matrices A, C, D (alpha = 0.5) instead of
   the vertices; this module ports G_evParquet.
+Not Quack's: an exactly zero denominator of a regularized weight, where
+Quack's (1 - exp(-2 s d^2)) / d is 0/0, gives the weight its limit 0 and
+the slope in Z 0, the formula's value a few ulps off zero
+(`spin_orbital_two_body.regularized_inverse`, `spin_orbital_self_energy`),
+so H/STO-3G's spin flip, e_beta - e_alpha - J, which rounding of the
+mean-field energies and J puts at exactly 0.0 or at 2.2e-16, gives the same
+numbers either way in the eh TDA (the full eh problem's
+X + Y = Om^-1/2 Z^T (A - B)^1/2 is 0 times inf at an exactly zero
+A - B = A + B, NaN as in Quack, and is kept).
 
 COST AND MEMORY at nso = 138 spin orbitals (nO = 10, nS = 1280, nVV = 8128,
 nOO = 45; one nso^4 array is 2.9 GB), one BLAS thread, from the component
@@ -1849,7 +1858,7 @@ def _check_reference(mf):
             f'orbitals and energies are those of the core Hamiltonian alone: it drops the '
             f'Coulomb and exchange terms of the UHF Fock matrix, so its beta and virtual '
             f'levels are not the UHF ones (an H atom\'s beta 1s comes out degenerate with the '
-            f'occupied alpha 1s, a 0/0 in the parquet denominators). Build the reference with '
+            f'occupied alpha 1s, a 0/0 in Quack\'s denominators). Build the reference with '
             f'the class itself, mf = pyscf.scf.uhf.UHF(mol) (or pyscf.scf.ghf.GHF(mol)), then '
             f'mf.kernel(): it keeps those terms and converges to the proper UHF')
     if getattr(mf, 'with_df', None) is not None:

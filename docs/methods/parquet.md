@@ -107,7 +107,18 @@ ways (partial fractions first, or as it stands: `restricted_self_energy`),
 and so do the two drivers, which therefore agree as s_1b grows and differ at
 finite s_1b ([The two drivers](#the-two-drivers)). Z_p = 1/(1 - dSigma_pp/dw)
 is Quack's: each term is differentiated with its regularizer held fixed,
-which is not the derivative of the regularized self-energy.
+which is not the derivative of the regularized self-energy. At an exactly
+zero denominator, where Quack's formula gives 0/0, the port returns 0 for
+R(d), its limit, and 0 for the slope R(d)/d in Z, the value of Quack's
+formula a few ulps off zero, where 1 - exp(-2 s d^2) rounds to 0 (the
+slope's limit would be 2s): a zero mode's pole adds nothing to Sigma or to
+its derivative, whether rounding puts the mode at exactly 0 or a few ulps
+off. H/STO-3G's spin flip, e_beta - e_alpha - J, zero in exact arithmetic,
+comes out 2.2e-16 (two ulps of J) or exactly 0 as the mean-field energies
+and J round, and gives the same numbers either way in the eh TDA. Without
+the TDA the eh eigenvectors carry Omega^-1/2
+(X + Y = Omega^-1/2 Z^T (A - B)^1/2), which an exactly zero root makes 0
+times inf: the run is NaN, as in Quack.
 
 The static self-energy of qsPA comes in two forms. The SRG (similarity
 renormalization group) form, the paper's (`reg_pa=True`), regularizes each
