@@ -8,7 +8,11 @@ periodic root scan all bracket, refine inside the bracket and keep the largest
 valid Z (or follow a reference root) through `Solvers.qp_equation.
 find_qp_root`; on a self-energy that is a sum of known poles they return the
 same root and Z, and they read the one start point (`qp_start`), weight test
-(`quasiparticle_weight`) and selection rule (`select_qp_root`).
+(`quasiparticle_weight`) and selection rule (`select_qp_root`). The one route
+that chooses otherwise, on purpose, is the BSE(2) paper's AMS quasiparticle
+sequences (`BSE.second_order_qp`): it brackets and bisects with
+`SampledEquation` and keeps AMS's choice, which test_second_order_qp holds to
+a transcription of AMS's own loop.
 """
 import inspect
 import os

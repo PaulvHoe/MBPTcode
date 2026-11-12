@@ -1736,6 +1736,25 @@ UHF_PSD_CHARGE_AMPLITUDE_MIN = 1e-5
 # larger corrections and their satellites sit further out.
 QP_SEARCH_WINDOW_TIERS = ((0.0, 0.5), (1.5, 1.0), (4.0, 2.0))
 
+# The graphical quasiparticle solution of AMS's analytic GW code (moGWmodule
+# selfEnergy), which the BSE(2) paper's quasiparticle sequences follow
+# (`BSE.second_order_qp`): one scan per orbital over eps_HF -+ h, h set by
+# |eps_HF - mu| with mu halfway between the HOMO and the LUMO of the energies
+# the poles sit at -- (that depth above which the tier applies, half width
+# h), Ha -- and no wider window after it. The points are AMS's
+# gwConfig%nOmega, whose default lies outside the pasted module: the paper
+# runs' roots sit on the lattice 2h/99/2^k of a 100-point scan, and the
+# outputs' self-energy call counts are those of 100 points. Each sign change
+# of the scan is bisected until its bracket is within the width (Ha), the
+# steps at most, and AMS keeps the bracket's midpoint (its eps and maxiter).
+AMS_QP_WINDOW_TIERS = ((0.0, 0.5), (1.5, 1.0), (4.0, 2.0))
+AMS_QP_GRID_POINTS = 100
+AMS_QP_BISECTION_WIDTH = 1e-4
+AMS_QP_BISECTION_STEPS = 30
+# Elements of one (frequency x pole) block of a broadened pole sum evaluated
+# on a grid (`BSE.second_order_qp.pole_sum`): 32 MB of doubles.
+QP_POLE_SUM_BLOCK = 1 << 22
+
 # Floor on |Z| below which the periodic root scan (`pbc_self_energy.
 # qp_energy_g0w0`) counts a root as a pole artifact (Z -> 0 beside a pole of
 # Sigma_c) when it reports how many roots a metal's band has. Not a

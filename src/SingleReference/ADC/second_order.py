@@ -14,6 +14,7 @@ orbital.
 import numpy as np
 
 from src.SingleReference.common.eri_blocks import g_slice
+from src.Solvers.qp_equation import solve_qp_equation_poles
 
 
 def sigma2_poles(eps, nocc, p, B_aa=None, eri_chemist=None):
@@ -51,3 +52,22 @@ def sigma2(eps, nocc, p, w, B_aa=None, eri_chemist=None):
     d = 1.0 / (w - poles)
     r = res_D + res_X
     return float(r @ d), -float(r @ (d * d))
+
+
+def g0f2_energies(eps, nocc, B_aa=None, eri_chemist=None, states=None):
+    """(eps_qp, Z) of G0F2 on an HF reference: w = eps_p + Sigma(2)_pp(w) solved
+    for each orbital p in `states` (all when None) on the exact pole sum, over
+    the whole axis, the root of largest weight Z kept (`solve_qp_equation_poles`);
+    orbitals not in `states` keep eps. The paper's BSE(1)@GF2 takes AMS's
+    G0F2 instead (`BSE.second_order_qp`, sequence 'G0F2'), the largest weight
+    among the roots one 100-point scan brackets: the two agree wherever that
+    scan brackets this root, which a pole of Sigma(2) in the same grid cell
+    can hide.
+    """
+    eps = np.asarray(eps, dtype=float)
+    eps_qp, Z = eps.copy(), np.ones(eps.size)
+    for p in (range(eps.size) if states is None else states):
+        res_D, res_X, poles = sigma2_poles(eps, nocc, p, B_aa, eri_chemist)
+        eps_qp[p], Z[p] = solve_qp_equation_poles(res_D + res_X, poles, eps[p],
+                                                  label=f'G0F2 orbital {p}')
+    return eps_qp, Z

@@ -21,7 +21,8 @@
     adc_r_faddeev.py       restricted matrix-free Faddeev-ADC(3), DF (production)
     adc_r_flex.py          restricted one-shot FLEX (diagonal QP), for comparison
     second_order.py        Sigma(2) (= ADC(2), GF2), direct and SOX parts as
-                           pole lists, for methods that add or remove it
+                           pole lists, for methods that add or remove it;
+                           the G0F2 quasiparticle energies (g0f2_energies)
     spin_adapt.py          CSF isometry and adapter
     static_correction.py   Sigma(infinity) builders + build_static_correction
                            (MP2 to MP4 densities, CC, KS, solvent)

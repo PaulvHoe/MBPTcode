@@ -42,7 +42,10 @@ inside it, on any thread or MPI rank, into one list of
   `out['numerical_flags']`. With `qp_solver='find_qp_root'` they hold the
   root finder's own `'no_root'` and `'z_outside'` (the rows of every route
   below), for both spin orbitals of a spin pair (an RHF through
-  `run_parquet_so`).
+  `run_parquet_so`);
+- the BSE(2) driver `second_order_bse` and its quasiparticle sequences
+  `qp_sequence`: their result's `numerical_flags` (the sequence's own are also
+  in `res['qp']['numerical_flags']`).
 
 A flag raised outside all of these, by a solver called on its own, is
 warned about and nothing more.
@@ -65,6 +68,10 @@ warned about and nothing more.
 | periodic THC GW | no tabulated minimax grid reaches the asked accuracy; the largest grid runs | `MinimaxGridShort` | with `return_diagnostics=True`, `diag['numerical_flags']['minimax_tau_target_missed']`, the accuracy reached |
 | Davidson unit-vector seeds (`Solvers.davidson`, and the Casida / BSE guess in `LinearResponse.davidson_shared`) | the seed count, extended past a cut inside a cluster of degenerate diagonal entries, reached its cap; the seeds may split a degenerate set | `RuntimeWarning` | named flag `'davidson_guess_truncated'`; `counters['guess_truncated']`, which the Casida / BSE solve's `timings` carry as `'davidson_guess_truncated'` |
 | Casida / BSE Davidson | a root above its residual tolerance, or a root an unsettled higher pair may lie below | `RuntimeWarning` | `info['davidson_flags']`: `'davidson_not_converged'`, `'davidson_unconfirmed'` |
+| BSE(2) dynamical correction (`BSE.second_order_bse.dynamical_correction`) | the renormalization zeta = 1/(1 - slope) of a root is not positive | `RuntimeWarning` | named flag `'second_order_bse_zeta_nonpositive'`; the root's row is returned |
+| BSE(2) quasiparticle sequences (`BSE.second_order_qp.quasiparticle_cycle`) | an orbital has no root of positive weight in AMS's one scan window; it keeps its HF energy, as AMS keeps it | `RuntimeWarning` | named flag `'qp_sequence_no_root'`; Z is NaN in the cycle's record |
+| BSE(2) quasiparticle sequences (`BSE.second_order_qp.quasiparticle_cycle`) | the root kept for an orbital has Z <= 0.5: no quasiparticle, kept as AMS keeps it | `RuntimeWarning` | named flag `'qp_sequence_low_weight'`; the root is kept |
+| BSE(2) quasiparticle sequences (`BSE.second_order_qp.quasiparticle_cycle`) | the root kept for an orbital has Z > 1: AMS's rule keeps the largest weight, one above 1 included | `RuntimeWarning` | named flag `'qp_sequence_weight_above_one'`; the root is kept |
 | orbital response: the CPHF / Z-vector solve of a relaxed density (`Base.pyscf.cphf`) and the gradient layer's multiplier solve (`gradients.multipliers`) | the residual stayed above its tolerance; the last iterate is kept | `CphfNotConverged` | named flag `'orbital_response_not_converged'`, also in a `flags` list the caller hands the multiplier solve |
 | CC amplitudes and Lambda (also pyscf's CCSD under the CC density) | out of iterations | `CCNotConverged` | `converged` False, and the named flag `'cc_not_converged'` |
 | an iteration inside an ADC route (the CCD/CCSD or Brueckner amplitudes of Faddeev- and CC-ADC(3), the ladder CCD, a FLEX Lanczos resolvent, the Lanczos inverse square root of the Faddeev metric) | out of iterations or steps | `ADCNotConverged` | `out['converged']`, `info['converged']` or `solve_qp(...)['converged']` False, and the named flags `'cc_amplitudes_not_converged'`, `'brueckner_not_converged'`, `'ladder_amplitudes_not_converged'`, `'flex_resolvent_not_settled'`, `'inverse_sqrt_not_settled'` |

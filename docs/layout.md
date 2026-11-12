@@ -106,10 +106,11 @@ src/SingleReference/
                                sum-over-poles, the reaction field's shift,
                                the dense quasi-boson route
     LinearResponse/            Casida, RPA, the Casida Davidson, RPA
-                               correlation energies
+                               correlation energies, the BSE(2) kernel
     BSE/                       solve.py: the BSE drivers (solve_bse,
                                solve_bse_isdf, solve_bse_df); the dense
-                               quasi-boson BSE; the upfolded BSE
+                               quasi-boson BSE; the upfolded BSE; BSE(2) and
+                               its quasiparticle sequences
     Parquet/                   the parquet approximation of Marie and Loos,
                                ported from Quack: FLEX, osPA, evPA and qsPA,
                                closed shell (restricted.run_parquet) and in

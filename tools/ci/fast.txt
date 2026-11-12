@@ -512,6 +512,8 @@ pytest test_solvated_ground_surface.py
 # Placed by the 60 s rule on workstation wall times (8 threads): test_eigh_device 0.4 s, test_bse2_static_kernel 33 s
 script test_eigh_device.py
 script test_bse2_static_kernel.py
+pytest test_second_order_bse.py  # 6 s on one thread
+pytest test_second_order_qp.py  # 33 s on one thread
 pytest test_qp_hamiltonian_group_span.py
 pytest test_qp_hamiltonian_large_group.py
 pytest test_qp_group_lockstep.py

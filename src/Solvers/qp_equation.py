@@ -12,6 +12,12 @@ business: a sum of known poles brackets its roots between neighbouring poles
 (`PoleSum`), a self-energy known pointwise on a pole-aware grid
 (`SampledEquation`). No root is found by a Newton from a seed or by a dense
 eigensolve; Newton steps only refine inside a bracket, which bounds them.
+
+One route keeps another choice on purpose: the quasiparticle sequences of the
+BSE(2) paper (`BSE.second_order_qp`) reproduce AMS's graphical solution, so
+they bracket and bisect with `SampledEquation` on AMS's one window and grid
+(`split_depth=0`) and keep AMS's choice among those roots, the largest Z > 0,
+one above 1 included.
 """
 import warnings
 from typing import NamedTuple
@@ -1059,6 +1065,8 @@ class SampledEquation:
         Refined, it would keep f(l) > 0 > f(r) at its ends down to one ulp,
         which only a pole does when f rises, and be dropped there (`solve`)
         after about fifty evaluations of f.
+    split_depth: how often a cell may be halved (`_cells`); 0 brackets the
+        grid's own sign changes alone, as AMS's graphical solution does.
     rescan: False skips `follow_root`'s rescan of the window for the
         largest weight beside the root followed: with positive_weight
         beside a root below QP_WINDOW_Z_MIN (a root above it is the
@@ -1075,8 +1083,10 @@ class SampledEquation:
     def __init__(self, func, fprime=None, vectorized=False,
                  n_omega=QP_GRAPHICAL_N_OMEGA, tol=QP_GRAPHICAL_TOL,
                  max_iter=QP_GRAPHICAL_MAX_BISECTION, windows=None,
-                 refusals=(), positive_weight=False, rescan=True):
+                 refusals=(), positive_weight=False, rescan=True,
+                 split_depth=QP_SCAN_SPLIT_DEPTH):
         self.positive_weight, self.rescan = positive_weight, rescan
+        self.split_depth = int(split_depth)
         self.weight_sum = 1.0 if positive_weight else None
         self.vectorized = vectorized
         self.n_omega, self.tol, self.max_iter = int(n_omega), tol, max_iter
@@ -1108,7 +1118,7 @@ class SampledEquation:
         out = []
         for i in range(1, grid.size):
             out += self._cells(grid[i - 1], grid[i], f[i - 1], f[i],
-                               QP_SCAN_SPLIT_DEPTH)
+                               self.split_depth)
         return out, np.full(len(out), np.inf)
 
     def tighten(self, brackets, batch):
@@ -1131,7 +1141,7 @@ class SampledEquation:
             for c in sorted({c0 - d, c0 + d}):
                 if 0 <= c < grid.size - 1:
                     yield self._cells(grid[c], grid[c + 1], value(c),
-                                      value(c + 1), QP_SCAN_SPLIT_DEPTH)
+                                      value(c + 1), self.split_depth)
 
     def solve(self, bracket):
         """[(root, Z)] of a bracket (l, r, f(l), f(r)); empty for a pole."""
@@ -1210,7 +1220,7 @@ class SampledEquation:
                     break
                 for c in sorted(cells):
                     walked[c] = self._cells(grid[c], grid[c + 1], value(c),
-                                            value(c + 1), QP_SCAN_SPLIT_DEPTH)
+                                            value(c + 1), self.split_depth)
                     for br in walked[c]:
                         solved[br] = self.solve(br)
                         for w, z in solved[br]:
@@ -1240,7 +1250,7 @@ class SampledEquation:
                                  if c in walked else
                                  [rz for br in self._cells(
                                      grid[c], grid[c + 1], value(c),
-                                     value(c + 1), QP_SCAN_SPLIT_DEPTH)
+                                     value(c + 1), self.split_depth)
                                   for rz in self.solve(br)])
                         for w, z in roots:
                             if quasiparticle_weight(z, 0.0) and z > largest[1]:
