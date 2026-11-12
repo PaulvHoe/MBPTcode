@@ -165,6 +165,103 @@ def test_the_entry_points_warn_and_hand_the_branch_over():
     assert z2 < QP_WINDOW_Z_MIN
 
 
+#: Self-energies with residues of both signs, known pointwise: (a, weights,
+#: poles, where the root followed lies). Their real roots' weights need not
+#: sum to one. 'above': the root followed has Z 0.52, above QP_WINDOW_Z_MIN,
+#: and a root of Z 0.95 shares its window. 'below': the root followed has Z
+#: 0.46, and the slope at the secant root of the bracket holding a root of
+#: Z 0.92 weighs it at 1.45, no valid weight.
+SIGNED = {'above': (-0.021, [-0.02, 0.005], [-0.4, -0.2], -0.25),
+          'below': (0.048, [-0.0023, 0.0056, 0.01], [-0.235, 0.082, -0.141],
+                    0.154)}
+
+
+def signed_scan(case):
+    """f, f' and the `SampledEquation` of a SIGNED case."""
+    a, num, pol, _ = SIGNED[case]
+    num, pol = np.array(num), np.array(pol)
+
+    def f(w):
+        with np.errstate(divide='ignore'):          # a grid point on a pole
+            return w - a - float(np.sum(num / (w - pol)))
+
+    def fp(w):
+        with np.errstate(divide='ignore'):
+            return 1.0 + float(np.sum(num / (w - pol) ** 2))
+    return f, fp, SampledEquation(f, fp, tol=1e-12)
+
+
+@pytest.mark.parametrize('case', sorted(SIGNED))
+def test_a_signed_self_energy_reports_the_larger_weight_beside_it(case):
+    """With residues of both signs no Z bounds another root's, neither a Z
+    above QP_WINDOW_Z_MIN nor the slope at a bracket's secant root: a root
+    followed keeps its branch and reports the root of largest weight in its
+    window, the one the search without `follow` keeps (`QPRoot.flipped`,
+    `largest`, and through an entry point's `out` or warning); the largest
+    root followed is no flip."""
+    a, num, _, near = SIGNED[case]
+    f, fp, src = signed_scan(case)
+    ref = find_qp_root(src, a)
+    w_sat, z_sat = min(ref.found, key=lambda rz: abs(rz[0] - near))
+    assert min(num) < 0.0 and 0.0 < z_sat < ref.z
+    assert (z_sat > QP_WINDOW_Z_MIN) == (case == 'above')
+    if case == 'below':
+        lo, hi = src.windows(a)[0]
+        l, r, fl, fr = next(b for b in src.brackets(lo, hi)[0]
+                            if b[0] <= ref.w <= b[1])
+        assert not qpe.quasiparticle_weight(
+            1.0 / fp(l - fl * (r - l) / (fr - fl)), 0.0)
+    got = find_qp_root(signed_scan(case)[2], a, follow=(w_sat, None))
+    assert (got.w, got.z, got.followed) == (w_sat, z_sat, True)
+    assert got.largest == (ref.w, ref.z) and got.flipped(1e-12)
+    out = {}
+    assert qpe.solve_qp_equation_scan(f, fp, a, follow=w_sat, tol=1e-12,
+                                      out=out) == (w_sat, z_sat)
+    assert out['flipped'] and out['largest'] == (ref.w, ref.z)
+    with pytest.warns(RuntimeWarning, match='the largest weight is now'):
+        qpe.solve_qp_equation_scan(f, fp, a, follow=w_sat, tol=1e-12)
+    top = find_qp_root(signed_scan(case)[2], a, follow=(ref.w, None))
+    assert (top.w, top.largest) == (ref.w, (ref.w, ref.z))
+    assert not top.flipped(1e-12)
+
+
+#: A self-energy with residues of both signs followed from a point between
+#: two roots: (a, weights, poles, the point followed). The walk takes the
+#: cells about the point until the root nearest it (Z 0.31), through the
+#: cell of the root of largest weight (Z 0.44), which lies a little farther.
+WALKED = (0.2861, [0.00094, 0.01659, -0.02309], [0.1767, 0.3795, -0.4693],
+          0.17344)
+
+
+def test_the_cells_the_walk_took_are_weighed_too():
+    """The cells the walk took to the root followed are weighed with the
+    rest of its window: the root kept is the one nearest the point
+    followed, and the root of largest weight, in a cell the walk took, is
+    reported (the search without `follow` keeps it, refined in the bracket
+    of a wider window: to the refinement's tolerance)."""
+    a, num, pol, follow = WALKED
+    num, pol = np.array(num), np.array(pol)
+
+    def f(w):
+        with np.errstate(divide='ignore'):          # a grid point on a pole
+            return w - a - float(np.sum(num / (w - pol)))
+
+    def fp(w):
+        with np.errstate(divide='ignore'):
+            return 1.0 + float(np.sum(num / (w - pol) ** 2))
+    ref = find_qp_root(SampledEquation(f, fp, tol=1e-12), a)
+    got = find_qp_root(SampledEquation(f, fp, tol=1e-12), a,
+                       follow=(follow, None))
+    near = min((rz for rz in ref.found if 0.0 < rz[1] <= 1.0),
+               key=lambda rz: abs(rz[0] - follow))
+    assert min(num) < 0.0 and got.followed
+    assert abs(got.w - near[0]) <= 1e-12 and abs(got.z - near[1]) <= 1e-9
+    assert abs(ref.w - follow) > abs(got.w - follow) and ref.z > got.z
+    w_big, z_big = got.largest
+    assert abs(w_big - ref.w) <= 1e-12 and abs(z_big - ref.z) <= 1e-9
+    assert got.flipped(1e-12)
+
+
 def test_the_chain_follows_the_last_accepted_branch():
     """The kernels follow the branch the conventions hand them
     (`followed_branch`): the last accepted geometry's root and labels, else

@@ -185,12 +185,15 @@ def find_qp_root(source, a, follow=None, z_min=QP_WINDOW_Z_MIN, label='',
     own bracket, never from w, so the bits of the root kept do not depend on
     the walk that reached this geometry, only which root it is. Beside it,
     the root of largest weight here (`QPRoot.largest`): for a pole sum the
-    search without `follow`; for a scan the followed root itself where its
-    Z exceeds QP_WINDOW_Z_MIN (no other root of a positive-weight
-    self-energy can carry more), else the largest among the brackets of the
+    search without `follow`; for a scan of a positive-weight self-energy
+    the followed root itself where its Z exceeds QP_WINDOW_Z_MIN (no other
+    root can carry more), else the largest among the brackets of the
     window followed, a bracket refined only where its weight, estimated
-    from one slope at its secant root, can beat the best so far
-    (`SampledEquation.follow_root`).
+    from one slope at its secant root, can beat the best so far; for a
+    scan of weights of either sign, where neither shortcut holds, the
+    largest among every bracket of the window followed, each refined
+    whatever the Z of the followed root, at about the cost of one search of
+    that window (`SampledEquation.follow_root`).
     Re-deciding by weight at every geometry jumps branches where a satellite
     crosses the quasiparticle; the followed root stays on its branch through
     the avoided crossing, whatever its weight. Where the branch has gone (no
@@ -1057,7 +1060,9 @@ class SampledEquation:
         which only a pole does when f rises, and be dropped there (`solve`)
         after about fifty evaluations of f.
     rescan: False skips `follow_root`'s rescan of the window for the
-        largest weight beside a root below QP_WINDOW_Z_MIN; the root's
+        largest weight beside the root followed: with positive_weight
+        beside a root below QP_WINDOW_Z_MIN (a root above it is the
+        largest), otherwise beside a root of any Z; the root's
         `QPRoot.largest` is then None (not searched), and no warning is
         raised for it.
     No bound on one bracket's Z is known. With positive_weight the weights
@@ -1165,14 +1170,21 @@ class SampledEquation:
         bracket, so the root kept does not depend on `follow`'s bits; the
         grid points are evaluated as the cells reach them.
 
-        The largest weight: a root of Z above QP_WINDOW_Z_MIN is the largest
-        of a positive-weight self-energy, the weights of its roots summing
-        to one. Below, the window's other brackets are refined where the
+        The largest weight. With positive_weight a root of Z above
+        QP_WINDOW_Z_MIN is the largest, the weights of the roots summing to
+        one; below, the window's other brackets are refined where the
         weight estimated at their secant root can beat the best so far
-        (`_largest_beside`): with positive_weight cell by cell outward from
-        a on the grid points evaluated already, until the weights refined
-        leave no more for the rest; otherwise the whole window bracketed.
-        Unless `rescan` is off: () then,
+        (`_largest_beside`), cell by cell outward from a on the grid points
+        evaluated already, until the weights refined leave no more for the
+        rest (the whole window bracketed where `weight_sum` is None).
+        Weights of either sign bound neither: a root of Z above
+        QP_WINDOW_Z_MIN can lie beside one of larger weight, and the slope
+        at a secant root can lie outside (0, 1] for a root of valid weight.
+        So every bracket of the window followed is refined, whatever the Z
+        of the root followed, the cells the walk took and their roots
+        reused, at about the cost of one search of that window, and the
+        largest valid weight among them is reported (the root followed
+        unless a strictly larger one exists). Unless `rescan` is off: () then,
         not searched (`find_qp_root` records no largest weight and runs no
         search of its own)."""
         windows = self.windows(a)
@@ -1187,7 +1199,7 @@ class SampledEquation:
                          j, float(self.func(grid[j]))))
             c0 = min(max(int(np.searchsorted(grid, follow)) - 1, 0),
                      grid.size - 2)
-            solved, best = {}, None
+            solved, walked, best = {}, {}, None
             for d in range(grid.size - 1):
                 cells = [c for c in {c0 - d, c0 + d} if 0 <= c < grid.size - 1]
                 if not cells:
@@ -1197,8 +1209,9 @@ class SampledEquation:
                 if best is not None and near > abs(best[0] - follow):
                     break
                 for c in sorted(cells):
-                    for br in self._cells(grid[c], grid[c + 1], value(c),
-                                          value(c + 1), QP_SCAN_SPLIT_DEPTH):
+                    walked[c] = self._cells(grid[c], grid[c + 1], value(c),
+                                            value(c + 1), QP_SCAN_SPLIT_DEPTH)
+                    for br in walked[c]:
                         solved[br] = self.solve(br)
                         for w, z in solved[br]:
                             if quasiparticle_weight(z, 0.0) and (
@@ -1211,7 +1224,28 @@ class SampledEquation:
             if (abs(best[0] - follow) <= min(follow - lo, hi - follow)
                     or i == len(windows) - 1):
                 largest = best
-                if not quasiparticle_weight(best[1]):
+                if not self.positive_weight:
+                    # Weights of either sign need not sum to one over the
+                    # real roots: a Z above QP_WINDOW_Z_MIN leaves room for
+                    # a larger one, and the slope at a bracket's secant root
+                    # bounds nothing (it can lie outside (0, 1] for a root
+                    # of valid weight). Every bracket of the window is
+                    # refined, at any Z of the root followed, as the search
+                    # without one refines a window; the cells the walk took
+                    # are not bracketed or refined again.
+                    if not self.rescan:
+                        return best[0], best[1], None, ()
+                    for c in range(grid.size - 1):
+                        roots = ([rz for br in walked[c] for rz in solved[br]]
+                                 if c in walked else
+                                 [rz for br in self._cells(
+                                     grid[c], grid[c + 1], value(c),
+                                     value(c + 1), QP_SCAN_SPLIT_DEPTH)
+                                  for rz in self.solve(br)])
+                        for w, z in roots:
+                            if quasiparticle_weight(z, 0.0) and z > largest[1]:
+                                largest = (w, z)
+                elif not quasiparticle_weight(best[1]):
                     cells = (self.outward(lo, hi, a, f)
                              if self.weight_sum is not None
                              else [self.brackets(lo, hi)[0]])
@@ -1411,7 +1445,8 @@ def solve_qp_equation_scan(residual, fprime, a, follow=None,
     largest weight has left it. positive_weight: `SampledEquation`'s, a
     bracket where f falls is a pole of Sigma and is not refined; rescan:
     `SampledEquation`'s, False reports no largest weight beside a followed
-    root below QP_WINDOW_Z_MIN."""
+    root (with positive_weight, beside one below QP_WINDOW_Z_MIN; otherwise
+    beside one of any Z)."""
     source = SampledEquation(residual, fprime=fprime, tol=tol,
                              max_iter=max_iter, refusals=refusals,
                              positive_weight=positive_weight, rescan=rescan)
