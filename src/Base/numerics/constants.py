@@ -2891,3 +2891,45 @@ PARQUET_SO_DIAGONAL_BLOCK_ELEMENTS = 2**26
 # block of the vector and at most 1/PARQUET_MIN_BLOCKS_PER_VERTEX of the
 # largest: no temporary of the size of one vertex (2.9 GB at norb 138).
 PARQUET_DIIS_BLOCK_BYTES = 64 * 2**20
+# The frequency-averaged vertices (Parquet.averaged_vertices). Width x0 (Hartree)
+# of the zero-mode taper 1 - exp(-(x/x0)^2) that multiplies every
+# imaginary-axis weight, whose average jumps by 2 L(0) at x = 0 (the
+# Matsubara average of a pole pair is 0 at Omega = 0 exactly and -2 L(0) just
+# above). Evaluated as Quack's 1 - exp, the taper is exactly 0 for
+# |x| < 2^-27 x0 = 7.45e-16 Ha, so a zero mode that rounding puts a few ulps
+# off adds nothing, as the SRG weight (1 - exp(-2 s x^2)) / x is exactly 0
+# there (H/STO-3G's spin flip comes out at 2.2e-16 or exactly 0 by machine;
+# -expm1 would leave it (x/x0)^2 L(0) = 4.9e-18 L(0) at x0 = 1e-7, and 1 - exp
+# or -expm1 at x0 = 1e-8 about 4.5e-16 L(0)); and exactly 1 above
+# sqrt(54 ln 2) x0 = 6.12e-7 Ha, three decades below the 1e-3 Ha zero-mode
+# gate (PARQUET_EH_ZERO_MODE_TOL) and five below molecular eh excitations
+# (0.04 Ha and up).
+PARQUET_AVERAGED_TAPER_X0 = 1e-7
+# The averaged vertices' smallest explicit half-weight point (Hartree): a
+# narrower window's parameter (T = ln 2 / x_half, s = ln 2 / (2 x_half^2)) and
+# its arguments (x / sigma) would overflow or divide by zero; 1e-150 Ha is
+# far below any denominator a molecule rounds to (1e-16 Ha), so every window
+# is the bare pole there. A half-weight point that eta_2b gives (x_half None)
+# is sqrt(ln 2 / 2) / sqrt(eta_2b), never 0 for a finite eta_2b.
+PARQUET_AVERAGED_MIN_X_HALF = 1e-150
+# The averaged vertices' triangle (imaginary) and Fejer (real) windows: below
+# u = x T = 1/2 their closed forms, (u + expm1(-u)) / (x u) and
+# (1 - sin(u) / u) / x, cancel to a few digits, and they are summed as their
+# series instead, 16 and 8 terms, the first term left out below 1e-17 of the
+# sum at u = 1/2.
+PARQUET_AVERAGED_SERIES_BELOW = 0.5
+PARQUET_AVERAGED_TRIANGLE_TERMS = 16
+PARQUET_AVERAGED_FEJER_TERMS = 8
+# Rule H of the averaged vertices: the half-weight point x_half where
+# x R(x) = 1/2 fixes each window's parameter. These are the roots of the
+# windows without a closed form, each the double nearest the root (mpmath,
+# 60 digits; tests/test_parquet_averaged_vertex.py finds them again by
+# bracketing): imaginary Gaussian sqrt(pi) v erfcx(v) = 1/2 with
+# v = x_half / (sqrt(2) sigma); imaginary triangle (1 - exp(-u)) / u = 1/2
+# with u = x_half T (u = 2 + W_0(-2 exp(-2))); real Gaussian
+# 2 u F(u) = 1/2 with u = x_half / (sqrt(2) sigma), F Dawson's function;
+# real Fejer sin(u) / u = 1/2 with u = x_half T.
+PARQUET_RULE_H_IMAGINARY_GAUSSIAN = 0.4327515993663079
+PARQUET_RULE_H_IMAGINARY_TRIANGLE = 1.59362426004004
+PARQUET_RULE_H_REAL_GAUSSIAN = 0.5523608613479809
+PARQUET_RULE_H_REAL_FEJER = 1.895494267033981

@@ -41,6 +41,12 @@ The modules:
                                 kernels, effective integrals and vertices
     spin_orbital_self_energy.py the spin-orbital self-energies, diagonal at any
                                 frequency and static
+    averaged_vertices.py        frequency-averaged reducible vertices for the
+                                vertex_builder hook of both drivers (not in
+                                Quack): the window-averaged pole weights on
+                                the imaginary and the real axis, their
+                                widths and the zero-mode taper, and the
+                                builders
     options.py                  the options both drivers take and their
                                 checks (refused before any work), QP_SOLVERS
                                 and the contract of a qp_solver function,

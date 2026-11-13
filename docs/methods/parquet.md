@@ -88,6 +88,8 @@ Eqs. (28) and (47)): each two-body iteration builds the vertices at omega = 0
 (Eqs. (39) and (45)), as Quack's R_*_Phi and G_*_Phi are called. The
 self-energy is not static: it takes each channel's eigenvalues Omega and
 effective integrals M, the whole frequency dependence of Eqs. (37) and (43).
+A vertex averaged over a frequency window can take the place of the point
+omega = 0 ([Frequency-averaged vertices](#frequency-averaged-vertices)).
 
 **Regularization.** The denominators d (Hartree) of the vertices and of the
 self-energy are regularized as Quack regularizes them, with the
@@ -320,7 +322,7 @@ NotImplementedError) before any integral is built.
 | `qp_solver` | how FLEX, osPA and evPA solve w = eHF_p + Sigma_pp(w): `'find_qp_root'` (the house's one root finder), `'linearized'` (eQP = eHF + Z SigC), or a function `qp_solver(sigma, eps_hf, eqp_lin, z_lin, orbitals) -> (eqp, z, converged)`, one contract for both drivers (`Parquet.options.checked_qp_solver`); qsPA refuses any value | | None: `'find_qp_root'` | lin_parquet (F: Quack's own search, not ported; G_evParquet runs only the linearized branch) |
 | `reg_pa` | `run_parquet`, qsPA: True the SRG static self-energy, False the eta form (flex, os and ev refuse False) | | True | reg_PA (T; R_evParquet, G_evParquet and G_qsParquet take it and ignore it) |
 | `broadening_1b` | `run_parquet`, qsPA with `reg_pa=False` only, where it is required: the broadening eta, finite and > 0 | Ha | None | Quack reads reg_1b for it, the input that is the flow parameter elsewhere |
-| `vertex_builder` | the reducible-vertex hook ([The vertex hook](#the-vertex-hook)) | | None: the static vertex | R_*_Phi, G_*_Phi called at omega = 0d0 |
+| `vertex_builder` | the reducible-vertex hook ([The vertex hook](#the-vertex-hook)); `averaged_vertices.averaged_vertex_builder` makes frequency-averaged vertices ([Frequency-averaged vertices](#frequency-averaged-vertices)) | | None: the static vertex | R_*_Phi, G_*_Phi called at omega = 0d0 |
 | `frozen` | frozen orbitals are not ported: only None or 0 | | None | nC = nR = 0 |
 
 The damping is evaluated as Quack evaluates it, alpha Phi_new +
@@ -622,7 +624,9 @@ res = run_parquet(mf, 'os', eta_1b=1e8, eta_2b=1.0, max_diis_2b=5,
 On that water/cc-pVDZ RHF it converges in 35 two-body iterations, as the
 static vertex does, and moves the principal IP from 11.7736 to 11.7707 eV;
 `OMEGAS = (0.0,)` gives the default run's numbers. It shows the contract,
-not a validated method.
+not a validated method. `averaged_vertices` builds the averages over whole
+windows, with their weights in closed form, for both drivers
+([Frequency-averaged vertices](#frequency-averaged-vertices)).
 
 ### Planned: one tensor per insertion
 
@@ -655,3 +659,169 @@ energies at hand, needs a redesign:
   and [:, :, o, o]), so a state storing just those would hold about 2.1 N4 for
   all six; that changes the change and DIIS, so it is not a way to reproduce
   the paper.
+
+## Frequency-averaged vertices
+
+`Parquet/averaged_vertices.py` builds the reducible vertices of the kernels as
+averages over a frequency window, through the vertex hook and at the cost of
+the static vertex. The default run is not touched: these are builders handed
+in.
+
+**Where the static approximation drops frequency.** A reducible vertex enters
+the kernels at four places (Eq. (47)): the eh vertex crossed into the eh
+kernel and direct and swapped into the pp kernel, the pp vertex direct into
+the eh kernel. In the frequency-dependent equations the argument of each
+insertion is a combination of the receiving channel's frequencies (an energy
+transfer for the eh insertions, a pair energy for the pp one), integrated
+over; the static kernel approximation (Eq. (28)) takes each vertex at its own
+bosonic frequency omega = 0, so that the pole n of a channel weighs
+R(0 -+ Omega_n), with R(x) = (1 - exp(-2 s x^2)) / x of Eq. (52). The
+self-energy keeps its frequency dependence and does not read the vertices
+([What is computed](#what-is-computed)).
+
+**The SRG weight is already an average.** For an even weight w(y) of unit
+area, with the time window g(t) = int w(y) cos(y t) dy, the average of the pole
+1/x over the bosonic frequency is
+
+    real axis       R_w(x) = P.V. int w(y) / (x - y) dy = int_0^inf sin(x t) g(t) dt
+    imaginary axis  R_w(x) = x int w(nu) / (nu^2 + x^2) dnu = sign(x) L(|x|),
+                    L(x) = int_0^inf g(t) exp(-x t) dt
+
+On the real axis the principal value is kept and the absorptive part,
+-i pi w(x) per pole, which a real static kernel cannot hold, is dropped; on the
+imaginary axis (omega = i nu, a Matsubara average) nothing is dropped, since
+the average of a time-ordered pole with an even weight is real. Eq. (52)'s R is
+the real-axis average with the positive weight
+w_s(y) = 2 F(sqrt(2 s) y) / (pi^1.5 y), F Dawson's function, of unit area, time
+window erfc(t / sqrt(8 s)) and half width at half maximum 0.7517 / sqrt(s) Ha
+(2.9 eV at s_2b = 50, 20 eV at 1). The static vertex of the paper is therefore
+the principal-value vertex averaged over a Dawson window about omega = 0, and
+the s_2b scan of its Table II is a scan of that window's width, FLEX
+(s_2b = 0) the infinitely wide one. A window here is another weight, not an
+average where there was none.
+
+**Yirga and Campbell's central cluster.** Yirga and Campbell
+([arXiv:2010.02163](https://arxiv.org/abs/2010.02163), App. C) average the
+vertex of their functional renormalization group over patches of imaginary
+time; their cluster function at tau_m = 0, f_0(omega) = sinc(omega dtau)
+(Eq. (C4)), is a box of imaginary time, of half width T here. Read on the
+Matsubara axis, where their sums run, it gives the `'box'` window,
+R = (1 - exp(-T |x|)) / x: below the bare pole, monotone, and exponentially
+close to 1/x beyond 1/T, the exponential cousin of the SRG's
+(1 - exp(-2 s x^2)) / x. Read on the real axis, the same sinc weight gives the
+`'sinc'` window, which is no regularizer (below).
+
+**The windows.** Each has one width, its half-weight point x_half (Ha), where
+x R(x) = 1/2 (rule H, on either axis), which fixes its parameter:
+
+| axis | `window` | g(t) | frequency weight | R(x) for x > 0 | parameter |
+|---|---|---|---|---|---|
+| `'imaginary'` | `'box'` | 1 for t <= T | sin(T y) / (pi y) | (1 - exp(-x T)) / x | T = ln 2 / x_half |
+| `'imaginary'` | `'exponential'` | exp(-gamma t) | Lorentzian, half width gamma | 1 / (x + gamma) | gamma = x_half |
+| `'imaginary'` | `'gaussian'` | exp(-sigma^2 t^2 / 2) | Gaussian, standard deviation sigma | sqrt(pi / 2) / sigma erfcx(x / (sqrt(2) sigma)) | sigma = x_half / (sqrt(2) 0.43275) |
+| `'imaginary'` | `'triangle'` | (1 - t / T)_+ | Fejer, (1 - cos T y) / (pi T y^2) | (x T - 1 + exp(-x T)) / (T x^2) | T = 1.59362 / x_half |
+| `'real'` | `'gaussian'` | exp(-sigma^2 t^2 / 2) | Gaussian, standard deviation sigma | (sqrt(2) / sigma) F(x / (sqrt(2) sigma)) | sigma = x_half / (sqrt(2) 0.55236) |
+| `'real'` | `'lorentzian'` | exp(-eta t) | Lorentzian, half width eta | x / (x^2 + eta^2), the eta form | eta = x_half |
+| `'real'` | `'fejer'` | (1 - t / T)_+ | Fejer | (1 - sin(x T) / (x T)) / x | T = 1.89549 / x_half |
+| `'real'` | `'sinc'` | 1 for t <= T | sin(T y) / (pi y) | (1 - cos(x T)) / x | T = pi / (3 x_half) |
+| `'real'` | `'srg'` | erfc(t / sqrt(8 s)) | w_s | (1 - exp(-2 s x^2)) / x | s = ln 2 / (2 x_half^2) |
+
+The roots without a closed form are the registry's `PARQUET_RULE_H_*`, each
+the double nearest the root. By default (x_half None) every window takes the
+SRG's half-weight point at the run's s_2b, sqrt(ln 2 / (2 s_2b)) (0.0833 Ha at
+50), so that it weighs a pole there as the static vertex does; `'srg'` then
+takes s = s_2b itself and is the static vertex to the bit, a check of the
+plumbing. s_2b = 0 is an infinitely wide window: every weight 0, as the SRG's.
+On the imaginary axis every window gives a weight below the bare pole that
+falls monotonically with |x| (past the zero-mode taper, below); at one
+half-weight point the exponential
+approaches 1/x the slowest (1/x - gamma/x^2: it shifts every pole by gamma),
+the box the fastest. On the real axis the Gaussian overshoots the bare pole
+(x R up to 1.285, at x = 2.12 sigma), the Lorentzian stays below it and the
+Fejer window reaches it in decaying oscillations (x R up to 1.217).
+
+**Why the real-axis sinc is no regularizer.** (1 - cos x T) / x =
+2 sin^2(x T / 2) / x vanishes at x T = 2 pi k and swings between 0 and twice
+the bare pole forever: x R = 1 - cos(x T) never tends to 1, so a pole far out
+weighs anything from nothing to twice its bare weight as Omega T falls modulo
+2 pi, and the absorptive part dropped with it is as large as what is kept.
+It is offered only so that it can be compared.
+
+**Zero modes.** An imaginary-axis weight jumps at x = 0, to +-L(0) on either
+side (the average of an eh pole pair is 0 at Omega = 0 exactly and -2 L(0)
+just above), so rounding of an exact zero mode would change the run. Every
+imaginary-axis weight is multiplied by the taper 1 - exp(-(x/x0)^2),
+x0 = `PARQUET_AVERAGED_TAPER_X0` = 1e-7 Ha, evaluated as Quack evaluates its
+regularizer (1 - exp, not expm1): exactly 0 below 7.45e-16 Ha and exactly 1
+above 6.12e-7 Ha. H/STO-3G's spin flip, 2.2e-16 or exactly 0 by machine,
+then gives the same run to the bit, as it does with the static vertex
+([Regularization](#what-is-computed)). The real-axis weights are continuous
+and 0 at x = 0 and take no taper: a mode a few ulps off weighs R'(0) times
+its offset. Without the eh TDA a mode near zero carries eigenvectors of order
+Omega^-1/2, and an imaginary-axis weight, which tends to L(0) and not to 0,
+gives it a vertex of order L(0) / Omega, where the SRG's 2 s Omega keeps it
+finite: the taper removes what rounding makes of an exact zero, not an open
+shell's spin rotation at the SCF residual (1e-7 to 1e-4 Ha, flagged
+`'parquet_eh_zero_mode'`), nor a closed shell's soft triplet near its
+instability. Run the imaginary windows under the eh TDA wherever an eh mode
+can come near zero.
+
+**Where it acts.** At the insertions only: the kernels of the next two-body
+iteration and their effective integrals read the averaged tensors, and the
+change, the damping, DIIS and the convergence test stay the driver's. The
+self-energy does not read the vertices; it changes only through the spectra
+(Omega, M) that the averaged kernels give. FLEX builds vertices that nothing
+reads and is unaffected.
+
+**Running it.** After the example of [Running it](#running-it):
+
+```python
+from src.SingleReference.Parquet.averaged_vertices import averaged_vertex_builder
+from src.SingleReference.Parquet.spin_orbital import run_parquet_so
+
+# the box of imaginary time at the static vertex's half-weight point
+# (0.0833 Ha at the default s_2b = 50)
+res = run_parquet(mf, 'os', max_diis_2b=5, vertex_builder=averaged_vertex_builder('box'))
+print(res.options['vertex_builder'])
+# averaged_vertex_builder('box', 'imaginary', x_half_eh=None, x_half_pp=None,
+#                         pp_center=0.0)
+
+# the exponential at the HOMO-LUMO gap, the pp vertices taken about
+# 2 mu = eps_HOMO + eps_LUMO instead of 0
+nO = mf.mol.nelectron // 2
+gap = mf.mo_energy[nO] - mf.mo_energy[nO - 1]
+two_mu = mf.mo_energy[nO] + mf.mo_energy[nO - 1]
+res = run_parquet(mf, 'os', max_diis_2b=5, vertex_builder=averaged_vertex_builder(
+    'exponential', x_half=gap, pp_center=two_mu))
+
+# spin orbitals: the same builder serves run_parquet_so (whose defaults, Quack's,
+# diverge at s_2b = 50; with damping and DIIS water/cc-pVDZ takes about 1.5 min)
+res = run_parquet_so(mf, 'os', damping=0.75, max_diis_2b=5,
+                     vertex_builder=averaged_vertex_builder('gaussian', 'real'))
+```
+
+One builder serves both drivers, which call it with different vertex names;
+`driver='restricted'` or `'spin_orbital'` restricts it to one. `x_half_eh` and
+`x_half_pp` give the eh and the pp source vertices their own widths. The builder's `__name__` names every parameter, so that
+`result.options['vertex_builder']` identifies the run; `widths(eta_2b)` gives
+each source vertex's half-weight point and window parameter at an s_2b, and
+`averaged_inverse(x, window, axis, x_half=...)` is the weight itself. A wrong
+argument is refused with a ValueError that names it.
+
+**Its limits.** One window per source vertex, the same at every insertion and
+for every matrix element, and no one-body energies: a width or a pp centre
+tied to the gap or to 2 mu is given as a number, taken from the reference,
+and does not follow evPA or qsPA. These are the hook's limits
+([The vertex hook](#the-vertex-hook)). The width that the frequency
+integration of an insertion calls for depends on the element: in a scalar
+model of one insertion between two pair propagators it is the imaginary-axis
+exponential window with gamma the mean of the two pairs' energies (exact when
+the two energies are equal, off by a relative (delta / (Omega + gamma))^2
+otherwise, delta half their difference), of the order of the gap and other
+for every element, which needs the per-insertion redesign
+([Planned: one tensor per insertion](#planned-one-tensor-per-insertion)).
+And these builders are not a validated method: the comparisons with the
+static vertex and with reference ionization potentials are still to be run.
+`tests/test_parquet_averaged_vertex.py` holds the weights against quadrature,
+the builders against a pole sum of their own, `'srg'` against the static
+vertex to the bit, and the runs of both drivers.

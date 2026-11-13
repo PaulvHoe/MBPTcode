@@ -533,6 +533,7 @@ pytest test_parquet_flags.py
 pytest test_parquet_diis.py
 pytest test_parquet_refusals.py
 pytest test_parquet_vertex_hook.py
+pytest test_parquet_averaged_vertex.py
 pytest test_parquet_so_layout.py
 pytest test_parquet_result_layout.py
 pytest test_parquet_internals.py
