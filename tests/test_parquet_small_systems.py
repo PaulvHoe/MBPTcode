@@ -673,10 +673,18 @@ def lowest_triplet_at(value):
 
 def assert_same_run(got, want, label, bar, z_bar):
     """Two parquet runs finite, with the same flags, and equal to `bar` in
-    eqp, eqp_lin and SigC and to `z_bar` in Z (None: to the bit)."""
+    eqp, eqp_lin and SigC and to `z_bar` in Z (None: to the bit). qsPA's
+    SigC matrix is held in the AO basis, S C SigC C^T S (`sigc_ao`), which no
+    orbital sign changes: in the final orbitals each element carries the
+    signs LAPACK gave two eigenvectors of the effective Fock matrix, and runs
+    a few ulps apart can get opposite ones (ADA's OpenBLAS flipped one of
+    H2's sigma_g orbitals between the triplet at 0.0 and at 2.2e-16, and with
+    it the sign of their element, 4.7e-3)."""
     assert flag_names(got) == flag_names(want), (label, flag_names(got), flag_names(want))
     for key in ('eqp', 'eqp_lin', 'sigc', 'z'):
         a, b = getattr(got, key), getattr(want, key)
+        if key == 'sigc' and np.ndim(b) == 2:
+            a, b = got.sigc_ao, want.sigc_ao
         if b is None:
             assert a is None, (label, key)
             continue
