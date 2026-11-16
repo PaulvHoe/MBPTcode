@@ -46,14 +46,21 @@ The modules:
                                 Quack): the window-averaged pole weights on
                                 the imaginary and the real axis, their
                                 widths and the zero-mode taper, and the
-                                builders
+                                builders, one window per vertex or, through
+                                the hook's per-insertion protocol, per
+                                vertex and insertion (the transverse one
+                                into the eh kernel on its own: Kauch's
+                                prescription)
     options.py                  the options both drivers take and their
                                 checks (refused before any work), QP_SOLVERS
                                 and the contract of a qp_solver function,
                                 and the roots find_qp_root follows
     spectra.py                  what the two-body loop hands the one-body
                                 step: each BSE's eigenvalues and effective
-                                integrals, and the reducible vertices
+                                integrals, and the reducible vertices, one
+                                tensor per vertex or per vertex and
+                                insertion (the roles of a per-insertion
+                                vertex builder)
     pairs.py                    Quack's orderings of the eh and pp pairs, the
                                 closed-shell spin weights and the triplet
                                 multiplicity

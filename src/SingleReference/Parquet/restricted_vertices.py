@@ -99,14 +99,15 @@ contraction with the weights sum_k c_k R(omega_k -+ Omega) in place of
 R(0 -+ Omega): `eh_vertex_from_weights` and `pp_vertex_from_weights` take the
 weights, so an average costs one contraction, as the static vertex does.
 Through the drivers' `vertex_builder` hook such an average can only be a
-real one (a complex tensor is refused) that does not depend on the orbitals
-or the quasiparticle energies and is the same at every place the vertex is
-inserted: one tensor per source channel feeds both the eh and the pp
-kernels (and their effective integrals), and the builder sees neither eps
-nor nO. Weighting each
-insertion on its own needs a redesign (one tensor per insertion place, eps
-and nO handed to the builder), which docs/methods/parquet.md describes; it
-is not implemented.
+real one (a complex tensor is refused). A builder of the default protocol
+gives one tensor per source channel, which feeds both the eh and the pp
+kernels (and their effective integrals), and sees neither eps nor nO; a
+per-insertion builder (per_insertion = True) gives each insertion role its
+own tensor, the eh vertex crossed into the eh kernel ('phbar_eh') and into
+the pp kernel ('eh_pp', its direct and swapped terms alike, which exchange
+turns into each other), the pp vertex into the eh kernel ('pp_eh'), and is
+handed the iteration's eps and nO (docs/methods/parquet.md, One tensor per
+insertion). The functions here read whichever tensors they are handed.
 
 Conventions
 -----------

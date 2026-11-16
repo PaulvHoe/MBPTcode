@@ -128,21 +128,71 @@ under the eh TDA wherever an eh mode can come near zero.
 What changes, what does not
 ---------------------------
 Only the insertions: the kernels of the next two-body iteration and their
-effective integrals read the averaged tensors (one per source channel: the
-change, the damping, DIIS and the convergence test are the driver's, as for
-any builder). The self-energy never reads the vertices; it changes only
-through the spectra (Omega, M) the averaged kernels give. FLEX builds
-vertices nothing reads and is unaffected.
+effective integrals read the averaged tensors (the change, the damping, DIIS
+and the convergence test are the driver's, as for any builder). The
+self-energy never reads the vertices; it changes only through the spectra
+(Omega, M) the averaged kernels give. FLEX builds vertices nothing reads and
+is unaffected.
 
-The limits are the hook's: one window per source vertex, the same at every
-insertion and for every matrix element, and no one-body energies (a width
-tied to the gap must be given as a number and does not follow evPA or qsPA).
-A scalar model of one insertion between two pair propagators, integrated
-over frequency, gives an element-dependent imaginary-axis width, of the order
-of the receiving pairs' energies; weighting each insertion on its own needs
-the redesign docs/methods/parquet.md plans. These builders are not a validated
-method: comparisons with the static vertex and with reference IPs are to be
-run.
+`averaged_vertex_builder` gives one window per source vertex, the same at
+every insertion and for every matrix element, and sees no one-body energies
+(a width tied to the gap is given as a number and does not follow evPA or
+qsPA). A scalar model of one insertion between two pair propagators,
+integrated over frequency, gives an element-dependent imaginary-axis width,
+of the order of the receiving pairs' energies. These builders are not a
+validated method: in osPA on six of the paper's aug-cc-pVTZ molecules (Ne,
+HF, H2O, BF, CO and N2) none of the 24 windows of whole source vertices
+tried brought the mean absolute error against the reference IPs below the
+static vertex's (250 meV; one tied it), and widening the window of the eh
+vertex lowers every principal IP (the imaginary exponential, from the SRG's
+half-weight point to 0.5 Ha with the pp vertex's kept there: by 0.08 to
+0.39 eV), toward the reference for CO and N2 and away from it for the other
+four.
+
+Per insertion
+-------------
+Each insertion has its own argument in the frequency-dependent equations:
+the eh vertex crossed into the eh kernel (the transverse particle-hole
+channel ph-bar, role 'phbar_eh') at nu' - nu, the pp vertex into the eh
+kernel ('pp_eh') at omega + nu + nu', and the eh vertex into the pp kernel
+twice, direct (the longitudinal channel ph) at nu' - nu and swapped (ph-bar)
+at -(omega + nu + nu'), one role ('eh_pp', below); the static approximation
+takes them all at 0. The transverse channel should enter at another
+frequency than the others, or its contribution comes out too large (Anna
+Kauch, private communication); widening a whole eh source vertex damps its
+insertion into the pp kernel with it. `insertion_vertex_builder` is a
+per-insertion builder (the drivers call it once per vertex and role, with
+the iteration's one-body energies, `InsertionVertexBuilder`) that gives each
+role its own window, None being the static vertex of the default to the
+bit, and `transverse_vertex_builder` windows the transverse insertion into
+the eh kernel alone. A width may follow the iteration: x_half = 'gap' is the
+HOMO-LUMO gap of the one-body energies the driver hands the builder
+(`iteration_gap`), anew at every two-body iteration of evPA and qsPA.
+
+"Another frequency" is a Matsubara one. Taken at the point omega = i gamma
+(a point, not an average), an eh pole pair 1/(omega - Omega) -
+1/(omega + Omega) = 2 Omega / (omega^2 - Omega^2) weighs
+-2 Omega / (Omega^2 + gamma^2): the real-axis 'lorentzian' window
+x / (x^2 + eta^2) at eta = gamma, so the role taken at i gamma is the window
+('lorentzian', 'real', gamma) (the vertex's imaginary part there, gamma times
+the difference of its resonant and antiresonant products, a real static
+kernel cannot hold); its weight stays below the bare pole's 1 / Omega. A
+real frequency omega_t would instead bring the poles closer,
+2 Omega / (omega_t^2 - Omega^2), and enlarge the insertion it was to soften.
+
+The two eh insertions into the pp kernel take one tensor because they are
+exchange partners: exchanging the two particles of a pair turns the direct
+term into the swapped one, and their transfers nu' - nu and
+-(omega + nu + nu') into each other. A window of a role is the same for
+every matrix element and cannot follow that exchange: one window on the
+direct term and another on the swapped one would leave the pp kernel
+D_pqrs -+ S_pqsr without its (anti)symmetry under the exchange, dependent on
+the basis of pairs it is written in (the closed-shell and the spin-orbital
+driver would differ on one closed shell), and most of their effect would be
+that asymmetry (docs/methods/parquet.md, One tensor per insertion). Within
+the pp kernel the transverse channel is so not apart from the longitudinal
+one, and Kauch's prescription is the transverse insertion into the eh
+kernel.
 
 A NaN eigenvalue gives a NaN weight and so a NaN vertex there, which the
 driver flags ('parquet_vertex_not_finite') as it does for any builder. An
@@ -152,7 +202,12 @@ gives, NaN there at eta_2b = 0 included.
 
 Cost: one static vertex (4 norb^4 nS flops for an eh vertex, 2 norb^4
 (nVV + nOO) for a pp vertex; at norb 138, nO 5: 0.97 and 6.5 TFLOP) and one
-evaluation of the window per pole; memory as the static vertex.
+evaluation of the window per pole; memory as the static vertex. A
+per-insertion builder builds each eh vertex once per role, twice (at
+norb 138 about 2 TFLOP more per two-body iteration, against some 21), and
+the loop carries its six tensors instead of four (2 norb^4 numbers more;
+over spin orbitals three instead of two, 1 nso^4 more), with DIIS vectors
+half as long again (docs/methods/parquet.md, One tensor per insertion).
 """
 import math
 
@@ -169,8 +224,18 @@ from src.Base.numerics.constants import (PARQUET_AVERAGED_FEJER_TERMS,
                                          PARQUET_RULE_H_REAL_FEJER, PARQUET_RULE_H_REAL_GAUSSIAN)
 from src.SingleReference.Parquet import restricted_vertices, spin_orbital_two_body
 from src.SingleReference.Parquet.options import checked_real
+from src.SingleReference.Parquet.restricted import static_reducible_vertex
 from src.SingleReference.Parquet.restricted_vertices import VERTEX_NAMES
+from src.SingleReference.Parquet.spectra import EH_ROLES, PP_ROLES
 from src.SingleReference.Parquet.spin_orbital import VERTEX_NAMES as SO_VERTEX_NAMES
+from src.SingleReference.Parquet.spin_orbital import static_reducible_vertex_so
+
+#: The roles of a per-insertion builder's windows, in the order
+#: `insertion_vertex_builder` takes them (`spectra.EH_ROLES`, `PP_ROLES`).
+ROLES = ('phbar_eh', 'eh_pp', 'pp_eh')
+#: The x_half of a per-insertion window that follows the iteration: the
+#: HOMO-LUMO gap of its one-body energies (`iteration_gap`).
+GAP = 'gap'
 
 #: The windows of each axis, in the order the module docstring lists them.
 WINDOWS = {
@@ -540,6 +605,209 @@ class AveragedVertexBuilder:
                                  self.pp_center - np.asarray(spectra.hh.om, dtype=float), eta_2b)
             return spin_orbital_two_body.pp_vertex_from_weights(spectra.ee.rho, w_ee,
                                                                 spectra.hh.rho, w_hh)
+
+
+def iteration_gap(eps, nO):
+    """The HOMO-LUMO gap min eps[nO:] - max eps[:nO] of one-body energies,
+    Hartree (eps[nO] - eps[nO - 1] where they ascend): the half-weight point
+    a per-insertion window with x_half 'gap' takes, from the energies of the
+    BSE diagonals the driver hands the builder at each two-body iteration
+    (the reference's in osPA, eOld in evPA, the current eQP in qsPA).
+
+    Parameters
+    ----------
+    eps : array_like, shape (n,)
+        One-body energies, occupied first (closed-shell orbitals or spin
+        orbitals).
+    nO : int
+        The occupied ones, 0 < nO < n.
+    """
+    eps = np.asarray(eps, dtype=float)
+    if eps.ndim != 1 or not 0 < int(nO) < eps.shape[0]:
+        raise ValueError(f'eps of shape {eps.shape} with nO = {nO!r}: one-body energies, '
+                         f'occupied first, and 0 < nO < their number')
+    return float(eps[int(nO):].min() - eps[:int(nO)].max())
+
+
+def insertion_vertex_builder(phbar_eh=None, eh_pp=None, pp_eh=None, *, pp_center=0.0,
+                             driver=None):
+    """A per-insertion `vertex_builder` that takes each role of the
+    reducible vertices at a window of its own (`InsertionVertexBuilder`).
+
+    Parameters
+    ----------
+    phbar_eh, eh_pp, pp_eh : None, str or tuple
+        The window of each role (module docstring, Per insertion): the eh
+        vertex crossed into the eh kernel (the transverse channel,
+        'phbar_eh') and into the pp kernel (its direct and swapped terms
+        alike, 'eh_pp'), the pp vertex into the eh kernel ('pp_eh'). None:
+        the static vertex, the default's to the bit
+        (`restricted.static_reducible_vertex`,
+        `spin_orbital.static_reducible_vertex_so`). Otherwise
+        (window, axis, x_half) as `averaged_inverse` takes them, axis
+        'imaginary' and x_half None (the SRG's half-weight point at the
+        run's eta_2b) where left out: a window name alone, or a tuple of
+        one to three; x_half 'gap' follows the iteration
+        (`iteration_gap`).
+    pp_center : float
+        The point c a windowed pp_eh weighs its poles about, R_w(c - Omega),
+        Hartree, as `averaged_vertex_builder` takes it; with pp_eh None the
+        pp vertex is the static one at 0, and another pp_center is refused.
+    driver : {None, 'restricted', 'spin_orbital'}
+        As `averaged_vertex_builder`.
+
+    Returns
+    -------
+    InsertionVertexBuilder
+
+    Wrong arguments are refused with a ValueError naming the argument.
+
+    Example: the transverse insertion at the Matsubara point i gamma
+    (gamma = 0.25 Ha), the other roles static,
+
+        res = run_parquet(mf, 'os', max_diis_2b=5, vertex_builder=insertion_vertex_builder(
+            phbar_eh=('lorentzian', 'real', 0.25)))
+    """
+    return InsertionVertexBuilder(phbar_eh, eh_pp, pp_eh, pp_center=pp_center, driver=driver)
+
+
+def transverse_vertex_builder(window, axis='imaginary', x_half=None, *, driver=None):
+    """The per-insertion builder of Kauch's prescription: the transverse
+    insertion into the eh kernel ('phbar_eh') at the window (window, axis,
+    x_half), the eh vertex in the pp kernel ('eh_pp') and the pp vertex
+    ('pp_eh') static: `insertion_vertex_builder` with phbar_eh = (window,
+    axis, x_half). In the pp kernel the transverse term is the exchange
+    partner of the longitudinal one and shares its tensor (module docstring,
+    Per insertion).
+
+        res = run_parquet(mf, 'ev', max_diis_2b=5,
+                          vertex_builder=transverse_vertex_builder('exponential', x_half='gap'))
+    """
+    return InsertionVertexBuilder(phbar_eh=(window, axis, x_half), driver=driver)
+
+
+class InsertionVertexBuilder:
+    """The per-insertion vertex builder of `insertion_vertex_builder`. Its
+    attribute per_insertion is True: the drivers call it once per reducible
+    vertex and role at every two-body iteration, as
+    builder(name, role, spectra, eta_2b, eps=eps, nO=nO) (the roles of
+    `spectra.EH_ROLES` for an eh vertex, `spectra.PP_ROLES` for a pp one),
+    and it returns the vertex `name` of this iteration's spectra with the
+    weights of that role's window: the default's static vertex for a role
+    without one, else the vertex `AveragedVertexBuilder` gives for that
+    window, its 'gap' resolved from eps and nO. Its `__name__` names every
+    role's window, so the run's options record it.
+
+    Attributes
+    ----------
+    windows : dict
+        {role: None or (window, axis, x_half)}, as checked.
+    pp_center, driver
+        As `insertion_vertex_builder` takes them.
+    """
+    per_insertion = True
+
+    def __init__(self, phbar_eh=None, eh_pp=None, pp_eh=None, *, pp_center=0.0, driver=None):
+        given = dict(phbar_eh=phbar_eh, eh_pp=eh_pp, pp_eh=pp_eh)
+        self.windows = {role: _checked_spec(role, given[role]) for role in ROLES}
+        center = checked_real('pp_center', pp_center, 'a finite energy (Ha)')
+        if not math.isfinite(center):
+            raise ValueError(f'pp_center = {pp_center!r}: a finite energy (Ha)')
+        if self.windows['pp_eh'] is None and center != 0.0:
+            raise ValueError(f'pp_center = {pp_center!r}: the point a windowed pp_eh is taken '
+                             f'about; with pp_eh None the pp vertex is the static one, at 0')
+        self.pp_center = center
+        if not (driver is None or (isinstance(driver, str) and driver in DRIVERS)):
+            raise ValueError(f'driver = {driver!r}: None or one of {tuple(DRIVERS)}')
+        self.driver = driver
+        roles = ', '.join(f'{role}={self.windows[role]!r}' for role in ROLES)
+        only = '' if driver is None else f', driver={driver!r}'
+        self.__name__ = (f'insertion_vertex_builder({roles}, pp_center={self.pp_center!r}'
+                         f'{only})')
+
+    def __repr__(self):
+        return self.__name__
+
+    def widths(self, eta_2b, eps=None, nO=None):
+        """{role: (x_half, parameter) or None} at this eta_2b: each windowed
+        role's half-weight point (Hartree) and its window's parameter
+        (`PARAMETERS`), a 'gap' one's at the one-body energies eps with nO
+        occupied (needed then); None for a static role."""
+        return {role: self._width(role, eta_2b, eps, nO) for role in ROLES}
+
+    def _width(self, role, eta_2b, eps, nO):
+        if self.windows[role] is None:
+            return None
+        window, axis, x_half = self.windows[role]
+        if x_half == GAP:
+            if eps is None or nO is None:
+                raise ValueError(f"the {role} window follows the gap: give eps and nO")
+            x_half = self._gap(role, eps, nO)
+        point = srg_half_weight_point(eta_2b) if x_half is None else x_half
+        return point, window_parameter(window, axis, x_half=x_half, eta_2b=eta_2b)
+
+    def _gap(self, role, eps, nO):
+        gap = iteration_gap(eps, nO)
+        if not gap > 0.0:
+            raise ValueError(f"the {role} window follows the gap, and the HOMO-LUMO gap of this "
+                             f"iteration's one-body energies is {gap!r} Ha: 'gap' takes a "
+                             f"positive one (a virtual level fell below an occupied one, or an "
+                             f"energy is NaN)")
+        return gap
+
+    def __call__(self, name, role, spectra, eta_2b, *, eps, nO):
+        """The vertex `name` of this iteration's `spectra` for its insertion
+        `role`: a (norb,)*4 or (nso,)*4 array, as the driver's default
+        returns."""
+        if name in VERTEX_NAMES:
+            driver = 'restricted'
+        elif name in SO_VERTEX_NAMES:
+            driver = 'spin_orbital'
+        else:
+            raise ValueError(f'unknown reducible vertex {name!r}: one of {VERTEX_NAMES} '
+                             f'(closed shell) or {SO_VERTEX_NAMES} (spin orbitals)')
+        if self.driver not in (None, driver):
+            raise ValueError(f'vertex {name!r} comes from the {driver} driver; this '
+                             f'builder was made for driver={self.driver!r}')
+        roles = EH_ROLES if name in ('eh_singlet', 'eh_triplet', 'eh') else PP_ROLES
+        if role not in roles:
+            raise ValueError(f'role {role!r} of the {name!r} vertex: one of {roles}')
+        if self.windows[role] is None:
+            if driver == 'restricted':
+                return static_reducible_vertex(name, spectra, eta_2b)
+            return static_reducible_vertex_so(name, spectra, eta_2b)
+        window, axis, x_half = self.windows[role]
+        if x_half == GAP:
+            x_half = self._gap(role, eps, nO)
+        averaged = AveragedVertexBuilder(window, axis, x_half=x_half, pp_center=self.pp_center,
+                                         driver=driver)
+        return averaged(name, spectra, eta_2b)
+
+
+def _checked_spec(role, spec):
+    """The window of `role` as (window, axis, x_half), or None: a window name
+    alone, or a tuple (or list) of one to three, axis 'imaginary' and x_half
+    None where left out; x_half None, 'gap' or a half-weight point. A
+    ValueError names the role."""
+    if spec is None:
+        return None
+    parts = (spec,) if isinstance(spec, str) else spec
+    if not isinstance(parts, (tuple, list)) or not 1 <= len(parts) <= 3:
+        raise ValueError(f'{role} = {spec!r}: None (the static vertex), a window name, or '
+                         f'(window, axis, x_half) with axis and x_half optional')
+    window, axis, x_half = tuple(parts) + ('imaginary', None)[len(parts) - 1:]
+    try:
+        axis = _checked_axis(axis)
+        window = _checked_window(window, axis)
+    except ValueError as err:
+        raise ValueError(f'{role} = {spec!r}: {err}') from None
+    if not (isinstance(x_half, str) and x_half == GAP):
+        try:
+            x_half = _checked_half_weight('x_half', x_half)
+        except ValueError as err:
+            raise ValueError(f"{role} = {spec!r}: {err}, or 'gap' (the iteration's HOMO-LUMO "
+                             f"gap)") from None
+    return window, axis, x_half
 
 
 def _checked_axis(axis):

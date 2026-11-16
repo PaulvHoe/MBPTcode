@@ -89,7 +89,8 @@ Eqs. (28) and (47)): each two-body iteration builds the vertices at omega = 0
 self-energy is not static: it takes each channel's eigenvalues Omega and
 effective integrals M, the whole frequency dependence of Eqs. (37) and (43).
 A vertex averaged over a frequency window can take the place of the point
-omega = 0 ([Frequency-averaged vertices](#frequency-averaged-vertices)).
+omega = 0, at all of its insertions or in each of its roles on its own
+([Frequency-averaged vertices](#frequency-averaged-vertices)).
 
 **Regularization.** The denominators d (Hartree) of the vertices and of the
 self-energy are regularized as Quack regularizes them, with the
@@ -322,7 +323,7 @@ NotImplementedError) before any integral is built.
 | `qp_solver` | how FLEX, osPA and evPA solve w = eHF_p + Sigma_pp(w): `'find_qp_root'` (the house's one root finder), `'linearized'` (eQP = eHF + Z SigC), or a function `qp_solver(sigma, eps_hf, eqp_lin, z_lin, orbitals) -> (eqp, z, converged)`, one contract for both drivers (`Parquet.options.checked_qp_solver`); qsPA refuses any value | | None: `'find_qp_root'` | lin_parquet (F: Quack's own search, not ported; G_evParquet runs only the linearized branch) |
 | `reg_pa` | `run_parquet`, qsPA: True the SRG static self-energy, False the eta form (flex, os and ev refuse False) | | True | reg_PA (T; R_evParquet, G_evParquet and G_qsParquet take it and ignore it) |
 | `broadening_1b` | `run_parquet`, qsPA with `reg_pa=False` only, where it is required: the broadening eta, finite and > 0 | Ha | None | Quack reads reg_1b for it, the input that is the flow parameter elsewhere |
-| `vertex_builder` | the reducible-vertex hook ([The vertex hook](#the-vertex-hook)); `averaged_vertices.averaged_vertex_builder` makes frequency-averaged vertices ([Frequency-averaged vertices](#frequency-averaged-vertices)) | | None: the static vertex | R_*_Phi, G_*_Phi called at omega = 0d0 |
+| `vertex_builder` | the reducible-vertex hook ([The vertex hook](#the-vertex-hook)), per vertex or, with `per_insertion = True`, per vertex and insertion ([One tensor per insertion](#one-tensor-per-insertion)); `averaged_vertices.averaged_vertex_builder` makes frequency-averaged vertices, `insertion_vertex_builder` and `transverse_vertex_builder` per-insertion ones ([Frequency-averaged vertices](#frequency-averaged-vertices)) | | None: the static vertex | R_*_Phi, G_*_Phi called at omega = 0d0 |
 | `frozen` | frozen orbitals are not ported: only None or 0 | | None | nC = nR = 0 |
 
 The damping is evaluated as Quack evaluates it, alpha Phi_new +
@@ -391,7 +392,10 @@ Both drivers return a dataclass, `restricted.ParquetResult` or
   `'find_qp_root'`);
 - `spectra` and `vertices`: the channels (Omega, M) of the last two-body
   iteration, which the last self-energy was built from, and the reducible
-  vertices after it, damped and extrapolated;
+  vertices after it, damped and extrapolated; with a per-insertion builder
+  `insertions` holds the tensor of every vertex in every role and
+  `vertices` the ones the eh kernels read ([One tensor per
+  insertion](#one-tensor-per-insertion)), otherwise `insertions` is None;
 - `ec_eh`, `ec_pp`: the correlation energies of the last BSEs as a
   spin-orbital problem has them (closed shell: singlet + 3 triplet, with the
   two parts in `ec_eh_spin`, `ec_pp_spin`); rounding noise under the TDA;
@@ -577,14 +581,28 @@ The contract:
   function's name, `'partial(<name>)'`, or the module and qualified name of a
   callable object's type).
 
-Its limits. One tensor per source channel is inserted at several places: in
-the closed-shell driver the eh vertices enter the eh kernels (crossed) and the
-pp kernels (direct and swapped), the pp vertices the eh kernels, and the
-effective integrals contract the same tensors as their channel's kernel; in
-the spin-orbital driver the eh vertex enters both kernels and the pp vertex
-the eh kernel. So a builder cannot weight a vertex differently where it enters
-different kernels, and it sees neither nO nor the one-body energies, which
-change at every one-body iteration. What it can express is a frequency average
+A builder whose attribute `per_insertion` is True is called instead once per
+vertex and per role, where the vertex is inserted (the eh vertex's two terms
+in the pp kernel being one role), as
+`vertex_builder(name, role, spectra, eta_2b, eps=eps, nO=nO)`, and the loop
+carries one tensor per role ([One tensor per
+insertion](#one-tensor-per-insertion)); each tensor is held to the contract
+above on its own, and a refusal or a flag names its vertex and role. The
+attribute is read before any work (and again by the spin-orbital two-body
+loop at each call, which refuses a state made for the other protocol): True
+or False (numpy's bool too), anything else is refused with a ValueError; a
+`functools.partial` without an attribute of its own takes its function's
+(`options.builder_protocol`).
+
+Its limits. A builder of the first protocol gives one tensor per source
+channel, inserted at several places: in the closed-shell driver the eh
+vertices enter the eh kernels (crossed) and the pp kernels (direct and
+swapped), the pp vertices the eh kernels, and the effective integrals
+contract the same tensors as their channel's kernel; in the spin-orbital
+driver the eh vertex enters both kernels and the pp vertex the eh kernel. So
+such a builder cannot weight a vertex differently where it enters different
+kernels, and it sees neither nO nor the one-body energies, which change at
+every one-body iteration. What it can express is a frequency average
 sum_k c_k Phi(omega_k) whose weights depend on neither and are the same at
 every insertion: `restricted_vertices.eh_vertex_from_weights` and
 `pp_vertex_from_weights` (and those of `spin_orbital_two_body`) contract the
@@ -628,37 +646,108 @@ not a validated method. `averaged_vertices` builds the averages over whole
 windows, with their weights in closed form, for both drivers
 ([Frequency-averaged vertices](#frequency-averaged-vertices)).
 
-### Planned: one tensor per insertion
+### One tensor per insertion
 
-Not implemented. Weighting each insertion on its own, with the one-body
-energies at hand, needs a redesign:
+The reducible vertices enter the kernels of the next iteration (Eq. (47)),
+and the effective integrals of each kernel, in three roles:
 
-- `INSERTIONS = (eh_s->eh, eh_t->eh, pp_s->eh, pp_t->eh, eh_s->pp,
-  eh_t->pp)`, the six places a closed-shell vertex enters a kernel (three in
-  spin orbitals: eh->eh, pp->eh, eh->pp);
-- the builder becomes `vertex_builder(name, into, spectra, eta_2b, eps, nO)`,
-  with `into` the channel the tensor is inserted into and `eps` the one-body
-  energies of the iteration;
-- the static builder ignores `into`, `eps` and `nO` and declares
-  `per_insertion = False`: the state keeps the four tensors, each handed to
-  both channels, so Quack's numbers, the memory and DIIS stay as they are;
-- a builder with `per_insertion = True` gets six stored tensors, over which
-  the change, the damping and DIIS run: 2 N4 more (5.8 GB at norb 138) and
-  DIIS vectors of 6 N4 instead of 4, that is 12 m N4 of history instead of
-  8 m;
-- `two_body_spectra(eps, eri, nO, into_eh, into_pp)`: `into_eh` (eh_s->eh,
-  eh_t->eh, pp_s->eh, pp_t->eh) goes to the eh kernels and effective
-  integrals, `into_pp` (eh_s->pp, eh_t->pp, with the pp->eh tensors as unread
-  filler) to the pp ones; no kernel builder changes, since each already reads
-  only what its channel needs;
-- if the direct and the swapped eh insertions into the pp kernel need
-  different weights, the pp pair block takes a second tensor there: eight
-  places;
-- each place is read only in its own blocks (eh->eh: [:, v, o, :] and
-  [:, o, v, :]; pp->eh: [:, v, :, o] and [:, o, :, v]; eh->pp: [:, :, v, v]
-  and [:, :, o, o]), so a state storing just those would hold about 2.1 N4 for
-  all six; that changes the change and DIIS, so it is not a way to reproduce
-  the paper.
+| role | vertex | where | channel | its frequency in the exact equations |
+|---|---|---|---|---|
+| `'phbar_eh'` | eh | crossed into the eh kernel, Phi^eh_pqsr | transverse, ph-bar | nu' - nu |
+| `'eh_pp'` | eh | into the pp kernel, direct Phi^eh_pqrs and swapped Phi^eh_pqsr | longitudinal ph and transverse ph-bar | nu' - nu and -(omega + nu + nu') |
+| `'pp_eh'` | pp | direct into the eh kernel, Phi^pp_pqrs | pp | omega + nu + nu' |
+
+The static kernel approximation takes them all at 0, as one tensor per
+vertex. The eh vertex enters the pp kernel twice, and its two terms there
+are one role because they are exchange partners: exchanging the two
+particles of a pp pair turns the direct (longitudinal) term into the swapped
+(transverse) one, and their transfers nu' - nu and -(omega + nu + nu') into
+each other. The exact vertex follows that exchange, since its frequency
+moves with it; a static tensor per role, the same for every matrix element,
+cannot, and other tensors in the two terms would leave the pp kernel
+D_pqrs +- S_pqsr (D the direct and S the swapped tensor) without its
+(anti)symmetry under the exchange. Its value would then depend on the basis
+of pairs it is written in: the closed-shell kernel (Quack's spin adaptation,
+pairs p <= q) and the spin-orbital one (pairs P < Q) part on the singlet
+elements between the pairs (p,p) and (r,r), by [(Phi^s + Phi^t)^D -
+(Phi^s + Phi^t)^S]_pprr / 4 (in the B, C and D blocks alike), and both part
+from the antisymmetrized kernel everywhere else. In a two-tensor variant, not
+kept, on water/6-31G, the imaginary exponential at 0.3 Ha on one of the two
+terms alone moved the pp eigenvalues of one kernel, built by each driver
+from the same iteration, apart by up to 0.12 Ha, and osPA's HOMO (TDA,
+s_1b = s_2b = 50, two-body DIIS 5, damping 0.75 in both drivers, the
+quasiparticle equation linearized) by +35.5 meV on the direct term or
+-38.5 meV on the swapped one, against -6.4 meV for both alike (closed shell;
++27.8, -31.3 and -6.5 meV over spin orbitals): most of a one-sided window's
+effect was the broken symmetry. With the swapped term and the transverse
+insertion into the eh kernel at the exponential of the iteration's gap
+(s = 50, two-body DIIS 5, one-body DIIS 3), the spin-orbital qsPA did not
+converge in 15 one-body iterations, where the closed-shell one converged in
+5; with one tensor for both terms, as kept, both converge (in 6 and 4). One role for both terms keeps the pp kernel
+(anti)symmetric whatever a builder returns. Telling the two apart would take
+a transfer frequency that follows the matrix element, on shell (eps_r - eps_p
+in the direct term, eps_s - eps_p in the swapped one), which no tensor per
+role expresses.
+
+A builder with `per_insertion = True` gives each role its own tensor. The
+drivers call it once per vertex and role at every two-body iteration, in the
+order of `spectra.RESTRICTED_INSERTIONS` (the eh singlet vertex in its two
+roles, the eh triplet one in its two, the pp singlet and the pp triplet one:
+six calls) or `spectra.SPIN_ORBITAL_INSERTIONS` (eh in its two, pp: three),
+as `vertex_builder(name, role, spectra, eta_2b, eps=eps, nO=nO)`: `eps` the
+one-body energies of the iteration's BSE diagonals (the reference's in osPA
+and at the first evPA iteration, eOld after it, the current eQP in qsPA),
+read-only, and `nO` the occupied (closed shell: doubly occupied) orbitals.
+What the loop does with the tensors:
+
+- it carries them in place of the vertices (`spectra.RestrictedInsertions`,
+  `SpinOrbitalInsertions`): the eh kernels and their effective integrals
+  read the eh vertices in their `'phbar_eh'` role and the pp ones in
+  `'pp_eh'`, the pp kernels and their effective integrals the eh vertices
+  in `'eh_pp'`; the kernel and integral functions are the default's, handed
+  other tensors;
+- the change max |Phi_new - Phi_old|, taken before the damping, the damping
+  and the convergence test run over all of them, and the history's `'err'`
+  lists the change of each in the order above;
+- two-body DIIS extrapolates them as one vector, each tensor weighing one
+  over the number of its vertex's tensors in the Gram matrix
+  (`spectra.insertion_weights`: an eh vertex's two a half each), so that
+  each vertex counts once, as in Quack's vector of four (with weight 1 each
+  the eh vertices would count twice, and the extrapolation would take
+  another path: water/6-31G osPA at s_2b = 1 to 1e-10, 67 two-body
+  iterations against the 76 of the default and of the weighted run);
+- evPA carries them from one one-body iteration to the next and qsPA resets
+  them, as the vertices;
+- `result.insertions` holds them after the last two-body iteration and
+  `result.vertices` the ones the eh kernels read (each eh vertex in its
+  `'phbar_eh'` role, each pp vertex in `'pp_eh'`);
+  `result.options['vertex_builder']` names the builder.
+
+Memory: two vertices more, 2 N4 (5.8 GB at norb 138), and two-body DIIS
+vectors of 6 N4, 12 max_diis_2b N4 of history; traced on water/cc-pVDZ (the
+memory test's osPA), 9.71 N4 against the default's 7.71, and 69.71 N4
+against 47.71 with max_diis_2b 5. Over spin orbitals one vertex more, and
+6 max_diis_2b nso^4 of history: 8.09 and 38.09 nso^4 against 7.09 and 27.09
+on water/6-31G. A builder that builds each role's vertex anew builds every
+eh vertex twice per iteration.
+
+The default is not touched: a builder without the attribute, or with
+False, the default among them, runs the loop as before, its tensors, memory
+and DIIS, to the bit (so the comparisons with Quack hold). A per-insertion
+builder that returns the static vertex in every role gives the default run
+to the bit without two-body DIIS, and with it to rounding at tight
+thresholds (water/6-31G, s_2b = 1, two-body DIIS 5 to 1e-10: closed-shell
+osPA and qsPA within 5e-14 Ha with the same iteration counts, evPA, whose
+history carries over, to about 1e-11 Ha; the spin-orbital eqp to the bit),
+which `tests/test_parquet_insertions.py` holds to 1e-12 Ha (the closed-shell
+evPA to 1e-9 Ha; over spin orbitals in osPA). At the default conv_2b a
+rounding difference can change an iteration count, and the two runs then
+agree to the threshold rather than to rounding (s = 50, conv_2b 1e-4: the
+closed-shell evPA by 9.3e-6 Ha and qsPA by 4.2e-5 Ha, with other counts in
+their later two-body loops), or not at all where a two-body loop does not
+converge. As with any builder other than the default's, the loop flags
+`'parquet_vertex_not_finite'` where a per-insertion tensor holds a NaN, so a
+run whose vertices go NaN carries more flags than the default's.
 
 ## Frequency-averaged vertices
 
@@ -808,20 +897,100 @@ each source vertex's half-weight point and window parameter at an s_2b, and
 `averaged_inverse(x, window, axis, x_half=...)` is the weight itself. A wrong
 argument is refused with a ValueError that names it.
 
-**Its limits.** One window per source vertex, the same at every insertion and
-for every matrix element, and no one-body energies: a width or a pp centre
-tied to the gap or to 2 mu is given as a number, taken from the reference,
-and does not follow evPA or qsPA. These are the hook's limits
-([The vertex hook](#the-vertex-hook)). The width that the frequency
-integration of an insertion calls for depends on the element: in a scalar
-model of one insertion between two pair propagators it is the imaginary-axis
-exponential window with gamma the mean of the two pairs' energies (exact when
-the two energies are equal, off by a relative (delta / (Omega + gamma))^2
-otherwise, delta half their difference), of the order of the gap and other
-for every element, which needs the per-insertion redesign
-([Planned: one tensor per insertion](#planned-one-tensor-per-insertion)).
-And these builders are not a validated method: the comparisons with the
-static vertex and with reference ionization potentials are still to be run.
+**Its limits.** `averaged_vertex_builder` gives one window per source vertex,
+the same at every insertion and for every matrix element, and sees no
+one-body energies: a width or a pp centre tied to the gap or to 2 mu is given
+as a number, taken from the reference, and does not follow evPA or qsPA.
+These are the limits of the hook's first protocol ([The vertex
+hook](#the-vertex-hook)); the per-insertion builders below give each
+role a window of its own and see the one-body energies of every
+iteration. The width that the frequency integration of an insertion calls
+for depends on the element: in a scalar model of one insertion between two
+pair propagators it is the imaginary-axis exponential window with gamma the
+mean of the two pairs' energies (exact when the two energies are equal, off
+by a relative (delta / (Omega + gamma))^2 otherwise, delta half their
+difference), of the order of the gap and other for every element, which no
+builder here expresses (one window per role at most). These builders are not
+a validated method: on six of the paper's aug-cc-pVTZ molecules (osPA, Table
+III's settings with two-body DIIS 5: Ne, HF, H2O, BF, CO, N2) none of the 24
+windows tried on whole source vertices (the box, exponential, Gaussian and
+triangle on the Matsubara axis, the Gaussian, Lorentzian, Fejer and SRG
+weights on the real one; the box and the exponential at several widths, the
+others at the SRG's half-weight point, the SRG weight with its pp centre at
+2 mu) brought the mean absolute error against the reference ionization
+potentials below the static vertex's 250 meV (the real-axis Gaussian tied
+it, with its BF run unconverged). Widening the window of the eh vertex
+lowers every principal IP: with both vertices at the imaginary exponential,
+the eh vertex's from the SRG's half-weight point to 0.5 Ha, by 0.08 eV (BF)
+to 0.39 eV (N2), which brings CO and N2, above the reference with the static
+vertex, toward it and takes Ne, HF, H2O and BF away from it.
 `tests/test_parquet_averaged_vertex.py` holds the weights against quadrature,
 the builders against a pole sum of their own, `'srg'` against the static
 vertex to the bit, and the runs of both drivers.
+
+**Per insertion.** A window on the eh source vertex damps its insertion into
+the pp kernel together with its transverse one into the eh kernel. The
+transverse particle-hole channel (ph-bar) should enter at another frequency
+than the other channels, or its contribution comes out too large (Anna
+Kauch, private communication). `insertion_vertex_builder` gives each role
+([One tensor per insertion](#one-tensor-per-insertion)) a window of its own,
+and `transverse_vertex_builder(window, axis, x_half)` is Kauch's
+prescription: the transverse insertion into the eh kernel at the window, the
+other roles static. In the pp kernel the transverse term is the exchange
+partner of the longitudinal one and shares its tensor, so the prescription
+leaves it static with it.
+
+```python
+from src.SingleReference.Parquet.averaged_vertices import (insertion_vertex_builder,
+                                                           transverse_vertex_builder)
+
+# the transverse insertion at the imaginary exponential of half width the
+# iteration's HOMO-LUMO gap, the other roles static
+res = run_parquet(mf, 'ev', max_diis_2b=5,
+                  vertex_builder=transverse_vertex_builder('exponential', x_half='gap'))
+print(res.options['vertex_builder'])
+# insertion_vertex_builder(phbar_eh=('exponential', 'imaginary', 'gap'), eh_pp=None,
+#     pp_eh=None, pp_center=0.0)
+
+# the transverse insertion at the Matsubara point i gamma, gamma = 0.25 Ha
+# (below), and the eh vertex in the pp kernel at the box of the SRG's width
+res = run_parquet(mf, 'os', max_diis_2b=5, vertex_builder=insertion_vertex_builder(
+    phbar_eh=('lorentzian', 'real', 0.25), eh_pp='box'))
+res.insertions.eh_singlet_phbar_eh      # the tensors the loop carried, per role
+```
+
+Each role, `phbar_eh`, `eh_pp` and `pp_eh`, takes None, the static vertex
+(the default's, to the bit), or a window as `averaged_inverse` takes it,
+`(window, axis, x_half)`, axis `'imaginary'` and x_half None (the SRG's
+half-weight point at the run's s_2b) where left out, a window name alone
+too. x_half `'gap'` is the HOMO-LUMO gap of the one-body energies the driver
+hands the builder, min eps[nO:] - max eps[:nO] (`iteration_gap`), taken
+anew at every two-body iteration, so it follows evPA and qsPA (a gap that is
+not positive is refused). `pp_center` is the point a windowed `pp_eh` is
+taken about (with `pp_eh` None it is refused). The builder's `__name__`
+names every role's window, `widths(eta_2b, eps, nO)` gives each role's
+half-weight point and parameter, and a wrong argument is refused with a
+ValueError that names it. The roles windowed alike are
+`averaged_vertex_builder` with that window. On water/6-31G at the tests'
+geometry (TDA, s_1b = s_2b = 50, two-body DIIS 5, the quasiparticle equation
+linearized) the imaginary exponential at the gap moves the principal IP of
+osPA from 12.068 eV (static) to 11.585 eV on the transverse role alone,
+12.087 eV on `'eh_pp'` alone, 12.456 eV on `'pp_eh'` alone, 11.555 eV on
+both eh roles and 11.891 eV on all three: the transverse insertion makes
+nearly all of the eh vertex's lowering, and the pp vertex raises the IP. Not
+validated either: the comparisons with reference IPs are still to be run.
+
+**Why a Matsubara frequency.** "Another frequency" is an imaginary one. Taken
+at the point omega = i gamma (a point, not an average), an eh pole pair
+1/(omega - Omega) - 1/(omega + Omega) = 2 Omega / (omega^2 - Omega^2) weighs
+-2 Omega / (Omega^2 + gamma^2), smaller in magnitude than its -2 / Omega at
+omega = 0: the real-axis
+`'lorentzian'` weight x / (x^2 + eta^2) at eta = gamma, so a role taken at
+i gamma is the window `('lorentzian', 'real', gamma)` (the vertex's imaginary
+part there, gamma times the difference of its resonant and antiresonant
+products, a real static kernel cannot hold). A real frequency omega_t
+would instead bring the poles closer, 2 Omega / (omega_t^2 - Omega^2), and
+enlarge the very insertion it was to soften. The imaginary-axis windows
+average over the Matsubara axis rather than take one point of it; the
+`'exponential'` shifts every pole by gamma, 1/(x + gamma).
+`tests/test_parquet_insertions.py` holds the per-insertion loop and builders.

@@ -14,7 +14,10 @@ shapes, and its dot product the sum of the blocks' ones: the four closed-shell
 reducible vertices, each (norb,)*4 (Quack's one vector of 4 norb^4 numbers,
 eh singlet, eh triplet, pp singlet, pp triplet), the two spin-orbital ones
 (eh, pp), or one block, the quasiparticle energies of evPA or the Fock matrix
-of qsPA.
+of qsPA. With `weights` the dot product weighs each block's by its own
+number: the per-insertion two-body loops weigh each tensor of a vertex by
+one over the number of its tensors (an eh vertex's two roles a half each),
+so that each vertex counts once, as in Quack's vector.
 
 THE STEP. The errors and iterates live in `size` slots allocated once. The
 caller takes the next slot (`next_slot`, once the history is full the oldest
@@ -47,7 +50,8 @@ vectors and returns new arrays.
 
 MEMORY. The slots hold 2 size vectors and nothing else is kept between
 steps: for the closed-shell vertices 8 size norb^4 numbers (116 GB at
-norb = 138 and size 5). A step adds its scratch block and nothing more, so
+norb = 138 and size 5; 12 size norb^4 for the six tensors of a
+per-insertion loop). A step adds its scratch block and nothing more, so
 the extrapolation stays below the vertex builds of the same iteration, and
 the two-body loop peaks at its peak without DIIS plus 8 size norb^4 numbers:
 on water/aug-cc-pVDZ (norb 41) 7.37 norb^4 without DIIS and 47.37 with
@@ -97,6 +101,10 @@ class QuackDIIS:
         The shape of each block of one vector.
     label : str
         Names the history in the flags' messages ('two-body', 'evPA one-body').
+    weights : sequence of float, optional
+        One positive finite number per block, the weight of its dot product
+        in the Gram matrix; None (the default, Quack's) weighs every block 1
+        and sums the plain dot products.
 
     Attributes
     ----------
@@ -107,13 +115,19 @@ class QuackDIIS:
         The rcond of every system solved since the history was made.
     """
 
-    def __init__(self, size, shapes, label='DIIS'):
+    def __init__(self, size, shapes, label='DIIS', weights=None):
         if int(size) != size or size < 1:
             raise ValueError(f'a DIIS history holds at least one pair, not {size!r}')
         self.size = int(size)
         self.shapes = tuple(tuple(int(n) for n in shape) for shape in shapes)
         if not self.shapes:
             raise ValueError('a DIIS vector has at least one block')
+        self.weights = None if weights is None else tuple(float(w) for w in weights)
+        if self.weights is not None and (
+                len(self.weights) != len(self.shapes)
+                or not all(0.0 < w < np.inf for w in self.weights)):
+            raise ValueError(f'DIIS block weights {weights!r}: one positive finite number per '
+                             f'block, {len(self.shapes)} blocks')
         self.label = str(label)
         self._errors = [tuple(np.empty(s) for s in self.shapes) for _ in range(self.size)]
         self._iterates = [tuple(np.empty(s) for s in self.shapes) for _ in range(self.size)]
@@ -172,8 +186,12 @@ class QuackDIIS:
         new = self._errors[s]
         for j in self._order:
             g = 0.0
-            for a, b in zip(new, self._errors[j]):
-                g += float(np.dot(a.reshape(-1), b.reshape(-1)))
+            if self.weights is None:
+                for a, b in zip(new, self._errors[j]):
+                    g += float(np.dot(a.reshape(-1), b.reshape(-1)))
+            else:
+                for weight, a, b in zip(self.weights, new, self._errors[j]):
+                    g += weight * float(np.dot(a.reshape(-1), b.reshape(-1)))
             self._gram[s, j] = self._gram[j, s] = g
         n = len(self._order)
         a = np.zeros((n + 1, n + 1))

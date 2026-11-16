@@ -330,6 +330,21 @@ def builder_name(builder):
     return f'{kind.__module__}.{kind.__qualname__}'
 
 
+def builder_protocol(builder):
+    """Whether `builder` takes the per-insertion protocol, a bool, or
+    ValueError: its attribute per_insertion, True or False (numpy's bool
+    too; anything else is refused), False where it has none. A
+    functools.partial without one of its own takes its function's, since it
+    forwards the per-insertion call's arguments as it forwards the others
+    (one level: functools.partial flattens a partial of a partial that
+    carries no attributes)."""
+    target = builder
+    if isinstance(builder, functools.partial) and not hasattr(builder, 'per_insertion'):
+        target = builder.func
+    return checked_switch(f'vertex_builder {builder_name(builder)}: per_insertion',
+                          getattr(target, 'per_insertion', False))
+
+
 def loop_options(scheme, tda_eh, tda_pp, eta_1b, eta_2b, max_it_1b, conv_1b, max_it_2b, conv_2b,
                  max_diis_1b, max_diis_2b, damping, vertex_builder, *, default_damping,
                  default_builder, eta_1b_read=True):
@@ -355,7 +370,12 @@ def loop_options(scheme, tda_eh, tda_pp, eta_1b, eta_2b, max_it_1b, conv_1b, max
     damping : float or None
         In [0, 1); None is `default_damping`.
     vertex_builder : callable or None
-        None is `default_builder`.
+        None is `default_builder`. Its attribute per_insertion, where it has
+        one (a functools.partial's function's, `builder_protocol`), is True
+        or False (numpy's bool too; anything else is refused): True is the
+        per-insertion protocol, called as
+        builder(name, role, spectra, eta_2b, eps=eps, nO=nO); without it, or
+        False, the builder is called as builder(name, spectra, eta_2b).
     default_damping : float
         The driver's (and scheme's) default weight of the previous vertices.
     default_builder : callable
@@ -371,7 +391,8 @@ def loop_options(scheme, tda_eh, tda_pp, eta_1b, eta_2b, max_it_1b, conv_1b, max
         scheme, tda_eh, tda_pp, eta_1b, eta_2b, max_it_1b, conv_1b,
         max_it_2b, conv_2b, max_diis_1b, max_diis_2b, damping (floats and
         ints, as checked), alpha = 1 - damping (Quack's mixing weight, the
-        loop's own) and vertex_builder (the callable).
+        loop's own), vertex_builder (the callable) and per_insertion (its
+        protocol, a bool, the loop's own).
     """
     switches = {name: checked_switch(name, value)
                 for name, value in (('tda_eh', tda_eh), ('tda_pp', tda_pp))}
@@ -407,12 +428,15 @@ def loop_options(scheme, tda_eh, tda_pp, eta_1b, eta_2b, max_it_1b, conv_1b, max
     damping = checked_damping(damping, default_damping)
     if vertex_builder is not None and not callable(vertex_builder):
         raise ValueError(f'vertex_builder = {vertex_builder!r}: a callable (name, spectra, '
-                         f'eta_2b) -> Phi, or None for {default_builder.__name__}')
+                         f'eta_2b) -> Phi, or with per_insertion = True (name, role, spectra, '
+                         f'eta_2b, eps=, nO=) -> Phi, or None for {default_builder.__name__}')
+    builder = default_builder if vertex_builder is None else vertex_builder
+    per_insertion = builder_protocol(builder)
     return dict(scheme=scheme, **switches, **regularizations,
                 max_it_1b=caps['max_it_1b'], conv_1b=thresholds['conv_1b'],
                 max_it_2b=caps['max_it_2b'], conv_2b=thresholds['conv_2b'], **lengths,
-                damping=damping, alpha=1.0 - damping,
-                vertex_builder=default_builder if vertex_builder is None else vertex_builder)
+                damping=damping, alpha=1.0 - damping, vertex_builder=builder,
+                per_insertion=per_insertion)
 
 
 def roots_to_follow(e_old, z_old):

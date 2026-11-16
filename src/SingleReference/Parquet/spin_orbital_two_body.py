@@ -43,16 +43,17 @@ Quack's G_eh_Phi and G_pp_Phi are the static vertices, w = 0. The frequency
 w enters as in the restricted R_eh_singlet_Phi and R_pp_singlet_Phi, so a
 frequency average of the vertex is an average of the pole weights g: build
 the weights yourself and hand them to `eh_vertex_from_weights` or
-`pp_vertex_from_weights`. Through the driver's `vertex_builder` hook such an
-average can only be one that does not depend on the orbitals or the
-quasiparticle energies and is the same at every place the vertex is
-inserted: one tensor per source channel is inserted at several places, the
-eh tensor in both the eh and the pp kernels (and their effective integrals),
-the pp tensor in the eh kernel and its effective integrals (Eq. 47), and the
-builder sees neither eps nor nO.
-Weighting each insertion on its own needs a redesign (one tensor per
-insertion place, eps and nO handed to the builder), which
-docs/methods/parquet.md describes; it is not implemented.
+`pp_vertex_from_weights`. Through the driver's `vertex_builder` hook a builder
+of the default protocol gives one tensor per source channel, inserted at
+several places, the eh tensor in both the eh and the pp kernels (and their
+effective integrals), the pp tensor in the eh kernel and its effective
+integrals (Eq. 47), and sees neither eps nor nO; a per-insertion builder
+(per_insertion = True) gives each insertion role its own tensor, the eh
+vertex crossed into the eh kernel ('phbar_eh') and into the pp kernel
+('eh_pp', its direct and swapped terms alike, which exchange turns into each
+other), the pp vertex into the eh kernel ('pp_eh'), and is handed eps and nO
+(docs/methods/parquet.md, One tensor per insertion). The functions here read
+whichever tensors they are handed.
 
 The loop around one iteration (damping, DIIS, the convergence test, the
 one-body update) is the driver's (`spin_orbital.two_body_spectra_so` chains

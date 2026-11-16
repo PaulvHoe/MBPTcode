@@ -185,7 +185,10 @@ the two vertices in place through one scratch block (`diis`): nothing beyond
 the history and that block, so the peak is the one without DIIS plus
 4 max_diis_2b nso^4 numbers (water/6-31G, nso 26: 7.09 nso^4 without DIIS,
 27.09 with max_diis_2b 5, both set by the eh vertex product, whose blocks
-are whole vertices at that size). The diagonal self-energy 45 s and 0.6 GB;
+are whole vertices at that size). A per-insertion vertex builder makes the
+loop carry three tensors in place of the two vertices: 1 nso^4 more, and DIIS
+vectors of 3 nso^4, 6 max_diis_2b nso^4 of history. The diagonal
+self-energy 45 s and 0.6 GB;
 the quasiparticle equation 0.1 s per orbital for its self-energy's residues
 (again when a qp_solver function changes orbital) plus 0.34 s per
 evaluation (half the orbitals with `spin_pairs`): find_qp_root 150 to
@@ -235,11 +238,14 @@ from src.SingleReference.Parquet.events import (FLAG_NO_ROOT, FLAG_ONE_BODY_NOT_
                                                 FLAG_Z_OUTSIDE, ParquetNotConverged,
                                                 ParquetNotFinite)
 from src.SingleReference.Parquet.options import (DEFAULT_QP_SOLVER, builder_name,
-                                                 checked_occupied, checked_qp_solver,
-                                                 flag_branch, loop_options, qp_solver_label,
-                                                 refuse_frozen, roots_to_follow, solve_with)
+                                                 builder_protocol, checked_occupied,
+                                                 checked_qp_solver, flag_branch, loop_options,
+                                                 qp_solver_label, refuse_frozen,
+                                                 roots_to_follow, solve_with)
 from src.SingleReference.Parquet.pairs import pp_pair_count
-from src.SingleReference.Parquet.spectra import Channel, SpinOrbitalSpectra, SpinOrbitalVertices
+from src.SingleReference.Parquet.spectra import (SPIN_ORBITAL_INSERTIONS, Channel,
+                                                 SpinOrbitalInsertions, SpinOrbitalSpectra,
+                                                 SpinOrbitalVertices, insertion_weights)
 from src.SingleReference.Parquet.spin_orbital_self_energy import (
     DiagonalSelfEnergySO, diagonal_self_energy_so, static_self_energy_srg_so)
 from src.SingleReference.Parquet.spin_orbital_two_body import (
@@ -309,7 +315,13 @@ class SpinOrbitalParquetResult:
         iteration, which the last self-energy was built from.
     vertices : spectra.SpinOrbitalVertices
         The reducible vertices after the last two-body iteration (damped and
-        extrapolated: Quack's old_*_Phi at the end of the run).
+        extrapolated: Quack's old_*_Phi at the end of the run); with a
+        per-insertion builder the tensors the eh kernel reads, eh in its
+        'phbar_eh' role and pp in its 'pp_eh' one.
+    insertions : spectra.SpinOrbitalInsertions or None
+        With a per-insertion builder (per_insertion = True) the three tensors
+        the loop carried, eh in each of its two roles and pp in its one,
+        after the last two-body iteration; None otherwise.
     ec_eh, ec_pp : float
         The eh and pp correlation energies (Quack's Ec_eh and Ec_pp) of the
         last two-body iteration's BSEs, the channel energies of the
@@ -331,11 +343,12 @@ class SpinOrbitalParquetResult:
     n_it_2b : list of int
     history : list of dict
         One entry per one-body iteration: 'two_body' (one dict per two-body
-        iteration: 'err' the two vertex changes (eh, pp), 'err_2b' their
-        max, 'err_eig' Quack's printed eigenvalue changes (eh, pp),
-        'diis_rcond', 'seconds'), 'converged_2b', 'n_it_2b', 'om' (the eh,
-        ee and hh eigenvalues after the two-body loop, which Quack prints on
-        success), 'ec_eh', 'ec_pp' (as the fields), 'eqp', 'sigc'
+        iteration: 'err' the two vertex changes (eh, pp; three with a
+        per-insertion builder, in the order of SPIN_ORBITAL_INSERTIONS),
+        'err_2b' their max, 'err_eig' Quack's printed eigenvalue changes
+        (eh, pp), 'diis_rcond', 'seconds'), 'converged_2b', 'n_it_2b', 'om'
+        (the eh, ee and hh eigenvalues after the two-body loop, which Quack
+        prints on success), 'ec_eh', 'ec_pp' (as the fields), 'eqp', 'sigc'
         (diagonal), 'z', 'eqp_lin', 'qp_solver' and 'qp_n_iter' (FLEX, osPA
         and evPA: the solver of the quasiparticle equation, a name or a
         function's label (`options.qp_solver_label`), and, per spin orbital,
@@ -406,6 +419,7 @@ class SpinOrbitalParquetResult:
     orbital: object = None
     qp_followed: object = None
     qp_flipped: object = None
+    insertions: object = None
 
 
 class SpinOrbitalReference:
@@ -440,7 +454,11 @@ def two_body_spectra_so(eps, eri, nO, vertices, *, first, tda_eh, tda_pp, timer=
     (phGLR, Eq. (34)); the same for the pp BSE (ppGLR_B/C/D, G_pp_Gamma_B/C/D,
     ppGLR; Eqs. (40), (41), (47b)); the eigenvectors contracted with the
     irreducible vertices of the same `vertices` (G_eh_screened_integral,
-    G_pp_screened_integral; Eqs. (38), (44)).
+    G_pp_screened_integral; Eqs. (38), (44)). Per-insertion `vertices` give
+    each kernel its own tensors: the eh kernel and its integrals read eh in
+    its 'phbar_eh' role and pp in 'pp_eh', the pp kernel and its integrals
+    eh in its 'eh_pp' role, in the direct and the swapped term alike
+    (`spectra.SpinOrbitalInsertions`).
 
     Parameters
     ----------
@@ -450,8 +468,9 @@ def two_body_spectra_so(eps, eri, nO, vertices, *, first, tda_eh, tda_pp, timer=
         <pq|rs> over spin orbitals.
     nO : int
         Occupied spin orbitals.
-    vertices : spectra.SpinOrbitalVertices
-        The reducible vertices of the previous two-body iteration.
+    vertices : spectra.SpinOrbitalVertices or spectra.SpinOrbitalInsertions
+        The reducible vertices of the previous two-body iteration: two, each
+        inserted in all of its roles (Quack's), or one per insertion.
     first : bool
         Quack's first two-body iteration of the run: the kernels are zero.
     tda_eh, tda_pp : bool
@@ -467,10 +486,14 @@ def two_body_spectra_so(eps, eri, nO, vertices, *, first, tda_eh, tda_pp, timer=
     ec_eh, ec_pp : float
         Quack's Ec_eh and Ec_pp of the two BSEs.
     """
+    if isinstance(vertices, SpinOrbitalInsertions):
+        into_eh, into_pp = vertices.eh_kernel(), vertices.pp_kernel()
+    else:
+        into_eh = into_pp = vertices
     with stage(timer, 'eh_bse'):
         A, B = eh_bse_blocks_so(eps, eri, nO, tda_eh)
         if not first:
-            gam_a, gam_b = eh_kernel_blocks_so(vertices, nO, tda_eh)
+            gam_a, gam_b = eh_kernel_blocks_so(into_eh, nO, tda_eh)
             A += gam_a
             if B is not None:
                 B += gam_b
@@ -478,11 +501,11 @@ def two_body_spectra_so(eps, eri, nO, vertices, *, first, tda_eh, tda_pp, timer=
         eh = solve_eh_bse_so(A, B, tda_eh)
         del A, B
     with stage(timer, 'eh_integrals'):
-        rho_eh = eh_effective_integrals_so(eri, vertices, eh.XpY, eh.XmY, nO)
+        rho_eh = eh_effective_integrals_so(eri, into_eh, eh.XpY, eh.XmY, nO)
     with stage(timer, 'pp_bse'):
         B, C, D = pp_bse_blocks_so(eps, eri, nO, tda_pp)
         if not first:
-            gam_b, gam_c, gam_d = pp_kernel_blocks_so(vertices, nO, tda_pp)
+            gam_b, gam_c, gam_d = pp_kernel_blocks_so(into_pp, nO, tda_pp)
             if B is not None:
                 B += gam_b
             C += gam_c
@@ -491,7 +514,7 @@ def two_body_spectra_so(eps, eri, nO, vertices, *, first, tda_eh, tda_pp, timer=
         pp = solve_pp_bse_so(B, C, D, tda_pp)
         del B, C, D
     with stage(timer, 'pp_integrals'):
-        rho_ee, rho_hh = pp_effective_integrals_so(eri, vertices, pp.X1, pp.Y1, pp.X2, pp.Y2, nO)
+        rho_ee, rho_hh = pp_effective_integrals_so(eri, into_pp, pp.X1, pp.Y1, pp.X2, pp.Y2, nO)
     spectra = SpinOrbitalSpectra(Channel(eh.om, rho_eh), Channel(pp.om_ee, rho_ee),
                                  Channel(pp.om_hh, rho_hh))
     return spectra, float(eh.ec), float(pp.ec)
@@ -506,15 +529,16 @@ def static_reducible_vertex_so(name, spectra, eta_2b):
     arrays) and refuses in any other shape or type (ValueError); NaN or inf
     in it is kept and flagged ('parquet_vertex_not_finite'). It can express
     a frequency average (spin_orbital_two_body.eh_vertex_from_weights and
-    pp_vertex_from_weights take averaged pole weights) only where the average
-    does not depend on the orbitals or the quasiparticle energies and is the
-    same at every place the vertex is inserted: one tensor per source channel
-    is inserted at several places, the eh tensor in both the eh and the pp
-    kernels (and their effective integrals), the pp tensor in the eh kernel
-    and its effective integrals, and the builder sees neither eps nor nO.
-    Weighting each insertion on its own needs a redesign (one tensor per
-    insertion place, eps and nO handed to the builder), which
-    docs/methods/parquet.md describes; it is not implemented.
+    pp_vertex_from_weights take averaged pole weights) that does not depend
+    on the orbitals or the quasiparticle energies and is the same at every
+    place the vertex is inserted: one tensor per source channel is inserted
+    at several places, the eh tensor in both the eh and the pp kernels (and
+    their effective integrals), the pp tensor in the eh kernel and its
+    effective integrals, and the builder sees neither eps nor nO. A builder
+    whose attribute per_insertion is True is called instead once per vertex
+    and role, as builder(name, role, spectra, eta_2b, eps=eps, nO=nO), and its
+    tensor is inserted in that role alone (`two_body_spectra_so`;
+    docs/methods/parquet.md, The vertex hook).
 
     Parameters
     ----------
@@ -544,13 +568,25 @@ class TwoBodyState:
     max_diis_2b is 1, which Quack skips; its slots are allocated once, here).
     The two vertex arrays are the state's own: every two-body iteration
     overwrites them in place (the damping without DIIS, the extrapolation
-    with it), and only `reset` replaces them."""
+    with it), and only `reset` replaces them.
 
-    def __init__(self, nso, nO, max_diis_2b):
+    With `per_insertion` the loop carries three tensors instead, eh in each
+    of its two roles and pp in its one (`stored`: (vertex, role) in the
+    order of SPIN_ORBITAL_INSERTIONS; (vertex, None) per vertex otherwise),
+    and its DIIS vector holds all three, eh's two weighing a half each in
+    the Gram matrix (`spectra.insertion_weights`), so that each vertex
+    counts once, as in Quack's vector of two."""
+
+    def __init__(self, nso, nO, max_diis_2b, per_insertion=False):
         self.nso, self.nO = int(nso), int(nO)
         self.max_diis_2b = int(max_diis_2b)
-        self.diis = (QuackDIIS(self.max_diis_2b, [(self.nso,) * 4] * len(VERTEX_NAMES),
-                               label='two-body') if self.max_diis_2b > 1 else None)
+        self.per_insertion = bool(per_insertion)
+        self.stored = (SPIN_ORBITAL_INSERTIONS if self.per_insertion
+                       else tuple((name, None) for name in VERTEX_NAMES))
+        weights = insertion_weights(self.stored) if self.per_insertion else None
+        self.diis = (QuackDIIS(self.max_diis_2b, [(self.nso,) * 4] * len(self.stored),
+                               label='two-body', weights=weights)
+                     if self.max_diis_2b > 1 else None)
         self.reset()
         self.started = False
 
@@ -559,15 +595,29 @@ class TwoBodyState:
         initialization, and G_qsParquet's at every one-body iteration)."""
         nV = self.nso - self.nO
         self.phi = None
-        self.phi = [np.zeros((self.nso,) * 4) for _ in VERTEX_NAMES]
+        self.phi = [np.zeros((self.nso,) * 4) for _ in self.stored]
         self.om = {'eh': np.zeros(self.nO * nV),
                    'ee': np.zeros(pp_pair_count(nV, 'spin-orbital')),
                    'hh': np.zeros(pp_pair_count(self.nO, 'spin-orbital'))}
         if self.diis is not None:
             self.diis.reset()
 
-    def as_vertices(self):
+    def kernel_vertices(self):
+        """What the next iteration's kernels read (`two_body_spectra_so`):
+        the two vertices, or the three tensors per insertion."""
+        if self.per_insertion:
+            return SpinOrbitalInsertions(*self.phi)
         return SpinOrbitalVertices(*self.phi)
+
+    def as_vertices(self):
+        """The two vertices (per insertion: those the eh kernel reads)."""
+        if self.per_insertion:
+            return SpinOrbitalInsertions(*self.phi).eh_kernel()
+        return SpinOrbitalVertices(*self.phi)
+
+    def as_insertions(self):
+        """The three tensors per insertion, or None."""
+        return SpinOrbitalInsertions(*self.phi) if self.per_insertion else None
 
 
 def _rows(a):
@@ -612,28 +662,35 @@ def quack_max(*values):
     return float(np.fmax.reduce(np.asarray(values, dtype=float)))
 
 
-def _built_vertex(phi, name, nso):
+def _built_vertex(phi, name, nso, role=None):
     """What a vertex builder returned, as a C-contiguous float64 array (no copy
     when it is one already) that the loop only reads; ValueError unless it is
     a real (nso,)*4 array (a complex one is refused, not cast, whatever its
     imaginary part; so is anything numpy cannot read as real numbers, a ragged
-    list among them)."""
+    list among them). The message names the vertex, and the role of a
+    per-insertion builder's tensor."""
+    what = _vertex_label(name, role)
     try:
         is_complex = np.iscomplexobj(phi)       # numpy reads a ragged list here
         if not is_complex:
             phi = np.ascontiguousarray(phi, dtype=float)
     except (TypeError, ValueError) as err:
-        raise ValueError(f'vertex_builder returned a {type(phi).__name__} for {name!r}, not '
+        raise ValueError(f'vertex_builder returned a {type(phi).__name__} for {what}, not '
                          f'an array of real numbers ({err}); a spin-orbital reducible vertex '
                          f'is a real {(nso,) * 4} array') from None
     if is_complex:
-        raise ValueError(f'vertex_builder returned a complex array for {name!r}; the '
+        raise ValueError(f'vertex_builder returned a complex array for {what}; the '
                          f'spin-orbital reducible vertex is real (return its real part if '
                          f'that is the vertex meant)')
     if phi.shape != (nso,) * 4:
         raise ValueError(f'vertex_builder returned an array of shape {phi.shape} for '
-                         f'{name!r}; a spin-orbital reducible vertex is {(nso,) * 4}')
+                         f'{what}; a spin-orbital reducible vertex is {(nso,) * 4}')
     return phi
+
+
+def _vertex_label(name, role):
+    """'name' as a message names a vertex, with its role where it has one."""
+    return repr(name) if role is None else f'{name!r} (role {role!r})'
 
 
 def _nonfinite_count(a):
@@ -675,10 +732,13 @@ def _damp_into(damped, err, new, old, alpha):
         np.subtract(damped, old, out=err)
 
 
-def _update_vertices(state, spectra, eta_2b, alpha, vertex_builder, timer):
+def _update_vertices(state, spectra, eta_2b, alpha, vertex_builder, timer, eps, nO):
     """The new vertices of one two-body iteration, damped and extrapolated
     into state.phi; returns the changes max |Phi_new - Phi_old| (eh, pp)
-    taken before damping (Quack's err_eh, err_pp).
+    taken before damping (Quack's err_eh, err_pp), or the three of a
+    per-insertion state, whose tensors are built one at a time by
+    builder(name, role, spectra, eta_2b, eps=eps, nO=nO), `eps` handed over
+    read-only, and damped and extrapolated in the same way.
 
     Each vertex is built (`vertex_builder`; what it returns is only read,
     refused unless it is a real (nso,)*4 array, and, from a builder other
@@ -699,18 +759,23 @@ def _update_vertices(state, spectra, eta_2b, alpha, vertex_builder, timer):
     being rewritten; the run ends there anyway)."""
     errors = []
     slot = None
-    for k, name in enumerate(VERTEX_NAMES):
+    if state.per_insertion:
+        eps = np.asarray(eps).view()
+        eps.flags.writeable = False         # the loop's own energies: the builder only reads
+    for k, (name, role) in enumerate(state.stored):
         with stage(timer, name + '_vertex'):
-            new = _built_vertex(vertex_builder(name, spectra, eta_2b), name, state.nso)
+            new = _built_vertex(vertex_builder(name, spectra, eta_2b) if role is None
+                                else vertex_builder(name, role, spectra, eta_2b, eps=eps, nO=nO),
+                                name, state.nso, role)
             if vertex_builder is not static_reducible_vertex_so:
                 bad = _nonfinite_count(new)
                 if bad:
                     flag(FLAG_VERTEX_NOT_FINITE,
                          f'vertex_builder {builder_name(vertex_builder)} returned {bad} NaN or '
-                         f'inf element(s) of {new.size} in the {name!r} vertex; kept as returned '
-                         f'(the change max |Phi_new - Phi_old| passes over NaN, as gfortran\'s '
-                         f'maxval, so the loop can report convergence with them)',
-                         ParquetNotFinite, stacklevel=4)
+                         f'inf element(s) of {new.size} in the {_vertex_label(name, role)} '
+                         f'vertex; kept as returned (the change max |Phi_new - Phi_old| passes '
+                         f'over NaN, as gfortran\'s maxval, so the loop can report convergence '
+                         f'with them)', ParquetNotFinite, stacklevel=4)
         with stage(timer, 'mixing'):
             old = state.phi[k]
             errors.append(maxval_abs_diff(new, old))
@@ -743,7 +808,10 @@ def two_body_loop_so(state, eps, eri, nO, opts, timer=None, check=True):
     opts : dict
         'tda_eh', 'tda_pp', 'eta_2b', 'max_it_2b', 'conv_2b', 'alpha' (Quack's
         mixing weight, 1 - damping, `_loop_options`) and 'vertex_builder'
-        (`static_reducible_vertex_so` for Quack's).
+        (`static_reducible_vertex_so` for Quack's; a per-insertion builder,
+        `options.builder_protocol`, needs a state made with per_insertion
+        True, and another one with False: ValueError otherwise, before any
+        work).
     timer : dict, optional
     check : bool
         Give Quack's verdict (False for FLEX: None).
@@ -755,6 +823,12 @@ def two_body_loop_so(state, eps, eri, nO, opts, timer=None, check=True):
         dict: 'two_body' (the iteration records), 'n_it_2b', 'converged_2b',
         'om' (the eigenvalues after the loop).
     """
+    protocol = builder_protocol(opts['vertex_builder'])
+    if protocol != state.per_insertion:
+        raise ValueError(f"vertex_builder {builder_name(opts['vertex_builder'])} has "
+                         f"per_insertion = {protocol} and the two-body state "
+                         f"per_insertion = {state.per_insertion}: make the state "
+                         f"TwoBodyState(nso, nO, max_diis_2b, {protocol})")
     n_it, err_2b = 0, PARQUET_QUACK_INITIAL_ERROR
     iterations = []
     spectra = ec_eh = ec_pp = None
@@ -762,7 +836,7 @@ def two_body_loop_so(state, eps, eri, nO, opts, timer=None, check=True):
         n_it += 1
         t0 = time.perf_counter()
         spectra, ec_eh, ec_pp = two_body_spectra_so(
-            eps, eri, nO, state.as_vertices(), first=not state.started,
+            eps, eri, nO, state.kernel_vertices(), first=not state.started,
             tda_eh=opts['tda_eh'], tda_pp=opts['tda_pp'], timer=timer)
         state.started = True
         om = {'eh': spectra.eh.om, 'ee': spectra.ee.om, 'hh': spectra.hh.om}
@@ -771,7 +845,7 @@ def two_body_loop_so(state, eps, eri, nO, opts, timer=None, check=True):
                              maxval_abs_diff(state.om['hh'], om['hh'])))
         state.om = om
         errors = _update_vertices(state, spectra, opts['eta_2b'], opts['alpha'],
-                                  opts['vertex_builder'], timer)
+                                  opts['vertex_builder'], timer, eps, nO)
         err_2b = quack_max(*errors)
         iterations.append({'err': errors, 'err_2b': err_2b, 'err_eig': err_eig,
                            'diis_rcond': None if state.diis is None else state.diis.rcond,
@@ -781,8 +855,10 @@ def two_body_loop_so(state, eps, eri, nO, opts, timer=None, check=True):
         converged = n_it != opts['max_it_2b']
         if np.isnan(err_2b):
             converged = False
+            changes = ('every reducible vertex change is' if state.per_insertion
+                       else 'both reducible vertex changes are')
             flag(FLAG_TWO_BODY_NOT_FINITE,
-                 f'spin-orbital parquet two-body loop: both reducible vertex changes are NaN '
+                 f'spin-orbital parquet two-body loop: {changes} NaN '
                  f'at iteration {n_it}; Quack ends the loop there and reports success, the '
                  f'spectra and vertices returned are NaN', ParquetNotFinite,
                  stacklevel=3)
@@ -1102,7 +1178,12 @@ def ev_parquet_so(eps_hf, eri, nO, scheme='os', *, tda_eh=True, tda_pp=True,
         float64 array the loop only reads (any other shape or type is
         refused; NaN or inf in it is flagged 'parquet_vertex_not_finite');
         default `static_reducible_vertex_so` (omega = 0, Quack's), whose
-        docstring says what another builder can express.
+        docstring says what another builder can express. A builder with the
+        attribute per_insertion = True is called as (name, role, spectra,
+        eta_2b, eps=eps, nO=nO) -> the tensor of one vertex in one of its
+        roles (spectra.EH_ROLES, spectra.PP_ROLES), eps the iteration's
+        one-body energies (read-only), under the same checks; the loop then
+        carries the three tensors (result.insertions).
     spin_pairs : array of int, shape (npair, 2), optional
         The (alpha, beta) spin orbitals of each spatial orbital of a
         spin-symmetric reference (run_parquet_so passes them for an RHF):
@@ -1139,7 +1220,7 @@ def ev_parquet_so(eps_hf, eri, nO, scheme='os', *, tda_eh=True, tda_pp=True,
 
 
 def _ev_loops(eps_hf, eri, nO, nso, scheme, opts, timer):
-    state = TwoBodyState(nso, nO, opts['max_diis_2b'])
+    state = TwoBodyState(nso, nO, opts['max_diis_2b'], opts['per_insertion'])
     diis_1b = (QuackDIIS(opts['max_diis_1b'], [(nso,)], label='evPA one-body')
                if opts['max_diis_1b'] > 1 else None)
     e_old = eps_hf.copy()
@@ -1347,7 +1428,7 @@ def qs_parquet_so(eps_hf, c_hf, s, x, hc, eri_ao, nO, *, tda_eh=True, tda_pp=Tru
 
 def _qs_loops(eps_hf, c_hf, s2, x2, hc, eri_ao, nO, opts, timer):
     nso = c_hf.shape[1]
-    state = TwoBodyState(nso, nO, opts['max_diis_2b'])
+    state = TwoBodyState(nso, nO, opts['max_diis_2b'], opts['per_insertion'])
     diis_1b = (QuackDIIS(opts['max_diis_1b'], [s2.shape], label='qsPA one-body')
                if opts['max_diis_1b'] > 1 else None)
     eqp, c = eps_hf.copy(), c_hf.copy()
@@ -1983,8 +2064,9 @@ def _result(scheme, history, eqp, sigc, z, eps_hf, nO, eqp_lin, qp_converged, sp
             ec_eh, ec_pp, converged_1b, n_it_1b, opts):
     converged_2b = [h['converged_2b'] for h in history]
     converged = converged_1b is not False and all(c is not False for c in converged_2b)
-    # 'alpha' is the loop's own 1 - damping, not an option
-    options = {k: v for k, v in opts.items() if k not in ('vertex_builder', 'alpha')}
+    # 'alpha' and 'per_insertion' are the loop's own (1 - damping, the builder's protocol)
+    options = {k: v for k, v in opts.items()
+               if k not in ('vertex_builder', 'alpha', 'per_insertion')}
     options['vertex_builder'] = builder_name(opts['vertex_builder'])
     if 'spin_pairs' in options:
         pairs = options['spin_pairs']
@@ -1994,6 +2076,7 @@ def _result(scheme, history, eqp, sigc, z, eps_hf, nO, eqp_lin, qp_converged, sp
     return SpinOrbitalParquetResult(
         scheme=scheme, eqp=eqp, sigc=sigc, z=z, eps_hf=eps_hf, nO=nO, eqp_lin=eqp_lin,
         qp_converged=qp_converged, spectra=spectra, vertices=state.as_vertices(),
+        insertions=state.as_insertions(),
         ec_eh=ec_eh, ec_pp=ec_pp, converged=bool(converged), converged_1b=converged_1b,
         converged_2b=converged_2b, n_it_1b=n_it_1b, n_it_2b=[h['n_it_2b'] for h in history],
         history=history, times={}, numerical_flags=[], options=options,
