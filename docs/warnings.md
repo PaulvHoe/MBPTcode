@@ -45,7 +45,10 @@ inside it, on any thread or MPI rank, into one list of
   `run_parquet_so`);
 - the BSE(2) driver `second_order_bse` and its quasiparticle sequences
   `qp_sequence`: their result's `numerical_flags` (the sequence's own are also
-  in `res['qp']['numerical_flags']`).
+  in `res['qp']['numerical_flags']`);
+- the soft-mode split `soft_mode_triplets` and its quasiparticle driver
+  `soft_mode_qp`: their result's `numerical_flags` (the split's are also in
+  `res['triplets']['numerical_flags']`).
 
 A flag raised outside all of these, by a solver called on its own, is
 warned about and nothing more.
@@ -72,6 +75,8 @@ warned about and nothing more.
 | BSE(2) quasiparticle sequences (`BSE.second_order_qp.quasiparticle_cycle`) | an orbital has no root of positive weight in AMS's one scan window; it keeps its HF energy, as AMS keeps it | `RuntimeWarning` | named flag `'qp_sequence_no_root'`; Z is NaN in the cycle's record |
 | BSE(2) quasiparticle sequences (`BSE.second_order_qp.quasiparticle_cycle`) | the root kept for an orbital has Z <= 0.5: no quasiparticle, kept as AMS keeps it | `RuntimeWarning` | named flag `'qp_sequence_low_weight'`; the root is kept |
 | BSE(2) quasiparticle sequences (`BSE.second_order_qp.quasiparticle_cycle`) | the root kept for an orbital has Z > 1: AMS's rule keeps the largest weight, one above 1 included | `RuntimeWarning` | named flag `'qp_sequence_weight_above_one'`; the root is kept |
+| soft-mode split of a TDHF triplet instability (`LinearResponse.soft_mode.soft_mode_triplets`) | a soft mode's collective ground state has more than `SOFT_MODE_EDGE_WEIGHT_MAX` of its weight near the ends of its RHF->UHF path, or its first excitation moves by more than `SOFT_MODE_BOUNDARY_SHIFT_MAX` when the periodic path is cut by walls; the periodic levels are kept | `SoftModeEdgeWeight` | named flag `'soft_mode_edge_weight'`; the mode's `edge_weight` and `excitation_walls` in `res['soft']` |
+| soft-mode split of a TDHF triplet instability (`LinearResponse.soft_mode.soft_mode_triplets`) | more than one set of soft triplet modes: each has its own collective model along its own path, the couplings between them are left out; the levels are kept | `SoftModesCoupled` | named flag `'soft_modes_coupled'` |
 | orbital response: the CPHF / Z-vector solve of a relaxed density (`Base.pyscf.cphf`) and the gradient layer's multiplier solve (`gradients.multipliers`) | the residual stayed above its tolerance; the last iterate is kept | `CphfNotConverged` | named flag `'orbital_response_not_converged'`, also in a `flags` list the caller hands the multiplier solve |
 | CC amplitudes and Lambda (also pyscf's CCSD under the CC density) | out of iterations | `CCNotConverged` | `converged` False, and the named flag `'cc_not_converged'` |
 | an iteration inside an ADC route (the CCD/CCSD or Brueckner amplitudes of Faddeev- and CC-ADC(3), the ladder CCD, a FLEX Lanczos resolvent, the Lanczos inverse square root of the Faddeev metric) | out of iterations or steps | `ADCNotConverged` | `out['converged']`, `info['converged']` or `solve_qp(...)['converged']` False, and the named flags `'cc_amplitudes_not_converged'`, `'brueckner_not_converged'`, `'ladder_amplitudes_not_converged'`, `'flex_resolvent_not_settled'`, `'inverse_sqrt_not_settled'` |

@@ -20,3 +20,4 @@ pytest test_laplace_df_twins.py  # generated ADC(5) Laplace DF twins, about 16 m
 pytest test_ee_adc_transition_density_heavy.py  # the exact-ISR oracle on LiH/6-31G, about 15 minutes on a workstation
 pytest test_faddeev_adc4_restricted_full.py  # complete setting of the restricted Faddeev-ADC(4) checks (H2O, LiH, LiH/6-31+G, DF H2O/6-31G), about 45 minutes on a workstation
 pytest test_adc4_scale_walls_full.py  # complete setting of the ADC(4) memory-wall checks (dense eigh poles on H2O/STO-3G, g-free pool on H2O/6-31G), about 2 hours on a workstation
+pytest test_soft_mode_triplet_full.py  # live EOM-CCSD (spin-flip for O3 and twisted ethylene) on the polyenes and the ethylene stretch, about two hours on 16 cores

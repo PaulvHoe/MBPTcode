@@ -33,6 +33,9 @@
                               quasiparticle energy
     qp_selection.py           which orbitals of the admitted window a surface
                               solves explicitly
+    soft_mode_qp.py           the PSD self-energies on TDHF screening with the
+                              soft triplet modes replaced by their collective
+                              levels (LinearResponse/soft_mode.py)
 
 Every quasiparticle equation is solved by the one root finder,
 `Solvers.qp_equation.find_qp_root`. Every symmetric eigenproblem goes through

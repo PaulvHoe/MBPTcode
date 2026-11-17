@@ -2933,3 +2933,52 @@ PARQUET_RULE_H_IMAGINARY_GAUSSIAN = 0.4327515993663079
 PARQUET_RULE_H_IMAGINARY_TRIANGLE = 1.59362426004004
 PARQUET_RULE_H_REAL_GAUSSIAN = 0.5523608613479809
 PARQUET_RULE_H_REAL_FEJER = 1.895494267033981
+
+# ---------------------------------------------------------------------------
+# src/SingleReference/LinearResponse/soft_mode.py: the soft-mode treatment of
+# a closed shell's TDHF triplet instability (and GW/soft_mode_qp.py)
+# ---------------------------------------------------------------------------
+# Which triplet modes leave the harmonic ladder (`LinearResponse.soft_mode.soft_split`):
+# the lowest always, every mode with Omega^2 below SOFT_MODE_OMEGA_CUT^2 (Ha^2;
+# 0.05 Ha = 1.36 eV, negative Omega^2 included), and every mode whose Omega^2
+# lies within SOFT_MODE_DEGENERACY_TOL (Ha^2) of a mode already chosen, so that
+# a degenerate set is replaced whole (CO's 3Pi pair agrees to 1e-15 Ha^2). The
+# cut keeps O3's second triplet (0.24 eV, three soft modes in cc-pVDZ) and
+# leaves out every second triplet of the other molecules checked: 3.4 eV for
+# H2CO and above (N2 5.0, ethylene and its twists 6.4 eV and up).
+SOFT_MODE_OMEGA_CUT = 0.05
+SOFT_MODE_DEGENERACY_TOL = 1e-6
+# A soft direction d, read as the nocc x nvirt matrix d_ia, turns pair k of its
+# singular-value decomposition by sigma_k Q / 2 along the RHF->UHF path, and
+# the 1D model is periodic on [-pi / sigma_1, pi / sigma_1), where the leading
+# pair has turned by +-90 degrees (the same determinant). The levels are solved
+# again with walls there, and a first excitation that moves by more than
+# SOFT_MODE_BOUNDARY_SHIFT_MAX (Ha) is flagged ('soft_mode_edge_weight'):
+# the closure then matters. N2/cc-pVDZ (sigma_1 = sigma_2 = 0.703, its two pi
+# pairs) gives 6.678 eV either way, and walls at 1.5 pi or 2 pi give 6.678 too,
+# while a period of 2 pi (the prototype's) gave 6.854. Measured shifts: 0.3 to
+# 1.0 mHa for H2/cc-pVDZ from 0.75 to 3.0 A, 0.3 to 0.8 mHa for H2O, H2CO,
+# ethylene and O3 at equilibrium.
+SOFT_MODE_BOUNDARY_SHIFT_MAX = 5e-3
+# Samples of V(Q) and D(Q) on [0, pi / sigma_1] (mirrored by parity): each sample is
+# one UHF energy of the rotated determinant, and a cubic spline through 41 of
+# them gives H2/cc-pVDZ's 1D excitation at 1.0 A within 1e-6 eV of the
+# Fourier-exact one (its V is a trigonometric polynomial of degree 2).
+SOFT_MODE_PATH_POINTS = 41
+# Grid points of the collective solves: 4th-order finite differences in 1D
+# (a harmonic V gives Omega and <1|Q|0>^2 = 1/(2 M Omega) to 1e-6 relative)
+# and 2nd-order ones in the 3D model's radial equation (5e-6 relative).
+SOFT_MODE_GRID_1D = 1200
+SOFT_MODE_GRID_3D = 3000
+# Odd (1D) or l = 1 (3D) levels kept per soft mode; levels whose transition
+# matrix element squared is below SOFT_MODE_WEIGHT_CUT carry no weight and
+# are dropped from the ladder.
+SOFT_MODE_LEVELS = 40
+SOFT_MODE_WEIGHT_CUT = 1e-14
+# The collective ground state's weight on the outer SOFT_MODE_EDGE_FRACTION of
+# its domain; above SOFT_MODE_EDGE_WEIGHT_MAX the levels depend on where the
+# path is cut, and the run is flagged ('soft_mode_edge_weight'). Measured:
+# 3e-4 to 1.3e-3 for H2/cc-pVDZ from 0.75 to 3.0 A, 3e-4 to 9e-4 for H2O, H2CO,
+# ethylene and O3 at equilibrium, 1e-6 for N2.
+SOFT_MODE_EDGE_FRACTION = 0.1
+SOFT_MODE_EDGE_WEIGHT_MAX = 1e-2

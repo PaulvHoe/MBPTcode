@@ -27,6 +27,9 @@
   Marie and Loos, ported from Quack: closed shell and in spin orbitals
 - [Second-order BSE kernels](methods/second-order-bse.md) — BSE(2)@HF,
   BSE(2)@GW and BSE(1)@GF2 with the dBSE(2) dynamical correction
+- [Soft-mode triplet instabilities](methods/soft-mode-triplets.md) — the soft
+  TDHF triplet modes of an RHF split off the ladder and quantized along the
+  RHF→UHF path, and the PSD self-energies on their levels
 - [Low-scaling factorization](methods/isdf-low-scaling.md) — the separable RI
   (ISDF) behind the O(N³) routes and ISDF-J/K for the SCF
 - [Environments](methods/environments.md) — polarizable-continuum screening,

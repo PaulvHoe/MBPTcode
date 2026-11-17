@@ -104,9 +104,13 @@ src/SingleReference/
     GW/                        self-energy, the QP equation, the evGW and
                                qsGW loops, contour deformation and
                                sum-over-poles, the reaction field's shift,
-                               the dense quasi-boson route
+                               the dense quasi-boson route, the PSD
+                               self-energies on the soft-mode triplet
+                               spectrum (soft_mode_qp.py)
     LinearResponse/            Casida, RPA, the Casida Davidson, RPA
-                               correlation energies, the BSE(2) kernel
+                               correlation energies, the BSE(2) kernel, the
+                               soft-mode split of a TDHF triplet instability
+                               (soft_mode.py)
     BSE/                       solve.py: the BSE drivers (solve_bse,
                                solve_bse_isdf, solve_bse_df); the dense
                                quasi-boson BSE; the upfolded BSE; BSE(2) and

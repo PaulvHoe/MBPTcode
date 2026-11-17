@@ -183,3 +183,4 @@ script test_ee_ri_flip.py
 pytest test_parquet_restricted_vs_quack_slow.py
 pytest test_parquet_so_vs_quack_slow.py
 pytest test_parquet_qp_solver_slow.py
+pytest test_soft_mode_triplet_slow.py  # ethylene twist and C=C stretch, butadiene, benzene: 47 s on two threads on a workstation

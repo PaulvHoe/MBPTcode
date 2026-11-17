@@ -539,3 +539,5 @@ pytest test_parquet_so_layout.py
 pytest test_parquet_result_layout.py
 pytest test_parquet_internals.py
 pytest test_parquet_memory.py
+# the soft-mode split of a TDHF triplet instability (H2 against FCI, small molecules against recorded EOM-CCSD)
+pytest test_soft_mode_triplet.py  # 8 s on two threads on a workstation
