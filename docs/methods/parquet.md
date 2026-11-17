@@ -468,9 +468,10 @@ is minus the highest occupied quasiparticle energy (for N2 the 3sigma_g).
 | CO | `C 0 0 0; O 0 0 1.1335` |
 | N2 | `N 0 0 0; N 0 0 1.1007` |
 
-The Table I and II entries below were computed by the port with the calls
-shown and, as the paper's were, Quack's own quasiparticle search, which the
-tests carry for their comparisons with Quack (`qp_solver=quack_newton` from
+The Table I, II and III entries below were computed by the port with the
+calls shown and, as the paper's were, Quack's own quasiparticle search (qsPA
+solves no quasiparticle equation), which the tests carry for their
+comparisons with Quack (`qp_solver=quack_newton` from
 `tests/parquet_quack_newton.py`). The default root finder gives the same
 principal IPs wherever both ran: to 1e-12 eV, and Z to 2e-7, in FLEX TDA and
 RPA at s_1b = 1e8 on Ne, water and ammonia in cc-pVDZ, Table II's osPA on
@@ -537,8 +538,34 @@ res = run_parquet(mf, 'ev', max_diis_1b=5, max_diis_2b=5)     # evPA
 res = run_parquet(mf, 'qs', max_diis_1b=5, max_diis_2b=5)     # qsPA
 ```
 
-Five is a choice, not the paper's. No Table III value has been reproduced
-yet: these aug-cc-pVTZ runs are left for the cluster. At small size, on water
+Five is a choice, not the paper's. With it, run on the cluster:
+
+| molecule | norb | osPA, eV (Z) | paper | evPA, eV (Z) | paper | qsPA, eV | paper | FCI |
+|---|---|---|---|---|---|---|---|---|
+| Ne | 46 | 21.2750 (0.936) | 21.28 | 21.0064 (0.917) | 21.01 | 21.2796 | 21.28 | 21.46 |
+| HF | 69 | 16.0565 (0.920) | 16.06 | 15.7868 (0.891) | 15.79 | 15.9807 | 15.98 | 16.15 |
+| H2O | 92 | 12.6830 (0.919) | 12.68 | 12.5068 (0.893) | 12.51 | 12.5331 | 12.53 | 12.68 |
+| NH3 | 115 | 10.8867 (0.928) | 10.89 | 10.7701 (0.910) | 10.77 | 10.6528 | 10.65 | 10.90 |
+| CH4 | 138 | 14.1443 (0.936) | 14.14 | 14.0122 (0.921) | 14.01 | 13.8272 | 13.83 | 14.38 |
+| BF | 92 | 10.7093 (0.950) | 10.71 | 10.6617 (0.938) | 10.66 | 10.5516 | 10.56 | 11.15 |
+| CO | 92 | 14.2307 (0.927) | 14.23 | 14.1411 (0.909) | 14.14 | 13.7601 | 13.76 | 13.93 |
+| N2 | 92 | 15.9646 (0.914) | 15.96 | 16.1062 (0.918) | 16.11 | — | 15.44 | 15.49 |
+
+osPA and evPA agree with the paper to its printed digits (Ne's osPA, 21.2750,
+at the rounding boundary), and so does qsPA but for BF, 8 meV below it; the
+fourth decimal can change with the number of BLAS threads, as any run with
+two-body DIIS can ([Options](#options)). Against the paper's FCI references
+the mean absolute error is 0.218 eV for osPA and 0.350 eV for evPA, as the
+paper's 0.22 and 0.35, and 0.295 eV for qsPA over the seven molecules it ran
+on (the paper's values give 0.294 over those seven and 0.26 over all eight).
+N2's qsPA did not finish within the 36 h of its cluster job (BF's took 26 h
+and CH4's 15 h). Every one-body loop converged, but some two-body loops ended
+at the cap of 200 iterations, flagged `'parquet_two_body_not_converged'`:
+3 of BF's 18 in evPA, 29 of its 30 in qsPA and 4 of CO's 16 in qsPA. Without
+two-body DIIS Ne's and HF's osPA still converge (in 62 and 172 two-body
+iterations, against 26 and 47), H2O's does not in 200, and HF's evPA and
+qsPA end in NaN; without one-body DIIS evPA (Ne, HF) and qsPA (Ne) do not
+converge in 50 one-body iterations. At small size, on water
 in cc-pVDZ: osPA converges in 73 two-body iterations; evPA in 11 one-body
 iterations with two-body DIIS alone and in 7 with `max_diis_1b=5` as well;
 qsPA with both in 5 one-body iterations (11 s on two threads).
@@ -978,7 +1005,7 @@ osPA from 12.068 eV (static) to 11.585 eV on the transverse role alone,
 12.087 eV on `'eh_pp'` alone, 12.456 eV on `'pp_eh'` alone, 11.555 eV on
 both eh roles and 11.891 eV on all three: the transverse insertion makes
 nearly all of the eh vertex's lowering, and the pp vertex raises the IP. Not
-validated either: the comparisons with reference IPs are still to be run.
+validated either (below).
 
 **Why a Matsubara frequency.** "Another frequency" is an imaginary one. Taken
 at the point omega = i gamma (a point, not an average), an eh pole pair
@@ -992,5 +1019,36 @@ products, a real static kernel cannot hold). A real frequency omega_t
 would instead bring the poles closer, 2 Omega / (omega_t^2 - Omega^2), and
 enlarge the very insertion it was to soften. The imaginary-axis windows
 average over the Matsubara axis rather than take one point of it; the
-`'exponential'` shifts every pole by gamma, 1/(x + gamma).
+`'exponential'` shifts every pole by gamma, 1/(x + gamma). At one gamma the
+point keeps Omega^2 / (Omega^2 + gamma^2) of a bare pole and the exponential
+Omega / (Omega + gamma), both half at Omega = gamma: the point keeps more of
+every pole above gamma and less of every pole below it.
+
+**Against the reference IPs.** On the six molecules and with the settings of
+the 24 windows above (in both with Quack's own quasiparticle search, as
+Tables I and II), no window on the transverse role alone did better than the
+static vertex's mean absolute error, 249.6 meV, by more than the 0.2 meV by
+which two runs of the per-insertion builder with every role static differ
+(249.4 and 249.6 meV). The imaginary exponential at 0.1, 0.2 and 0.5 Ha and
+at the RHF HOMO-LUMO gap gave 268 to 370 meV, the box at 0.2 Ha and at the
+gap 252 and 324 meV, and the point i gamma, `('lorentzian', 'real', gamma)`,
+at 0.1, 0.2, 0.5 and 1 Ha and at the gap 249 to 382 meV, its 249.4 meV at
+0.1 Ha a tie with the static vertex; `'eh_pp'` alone at the exponential of
+0.2 Ha gave 255 meV. The transverse insertion lowers the principal IPs of Ne,
+HF, H2O, CO and N2, the more the wider the window, and moves BF's by less
+than 10 meV: it takes CO and N2, above the reference with the static vertex,
+toward it (N2 to within 6 meV of it at the gap, with the box or the point
+i gamma) and Ne, HF and H2O away from it. The errors' range narrows, from
+-441 to +475 meV with the static vertex to -435 to +164 meV at the point
+i gamma at 0.5 Ha, only as their mean falls, from +10 to -185 meV. At the
+same gamma the point lowered the IPs less than the exponential, by 0.10 to
+0.21 of its shift at 0.1 Ha, 0.19 to 0.40 at 0.2 Ha, 0.46 to 0.78 at 0.5 Ha
+and 0.77 to 0.90 at the gap (BF aside), and at a similar mean error it did
+about as well as the box and the exponential: 315 meV at the gap (mean
+-269 meV) against 324 meV for the box at the gap and 327 meV for the
+exponential at 0.5 Ha (means -279 and -276 meV). In the runs at the point
+i gamma, and in an all-static run alongside them, the principal orbital's
+quasiparticle equation converged every time: the `'parquet_qp_not_converged'`
+they carry comes from virtual orbitals and from the inner-valence 3sigma of
+CO and 2sigma_g of N2 (the earlier runs did not record which orbitals).
 `tests/test_parquet_insertions.py` holds the per-insertion loop and builders.
