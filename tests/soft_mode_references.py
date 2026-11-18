@@ -113,7 +113,9 @@ def eom_ccsd_references(mf, direction, nroots=4):
     """(triplet, IP, overlap, HOMO weight, converged) by EOM-CCSD from the RHF: the triplet root
     whose singles overlap the soft direction most, its Davidson seeded with d itself so that the
     soft state's irreducible representation is searched whatever the diagonal favours, and the IP
-    root with the largest HOMO weight (Ha)."""
+    root with the largest HOMO weight (Ha). converged: CCSD and that matched triplet root; the
+    other roots only widen the search, and one of them need not converge (O3/cc-pVDZ's fourth
+    root, a guess left at 59 to 67 eV, not even in 200 Davidson cycles; ADA job 1240184)."""
     nocc = mf.mol.nelectron // 2
     nmo = mf.mo_coeff.shape[1]
     nvir = nmo - nocc
@@ -137,7 +139,7 @@ def eom_ccsd_references(mf, direction, nroots=4):
     eip, vip = np.atleast_1d(eip), np.atleast_2d(vip)
     hw = [float(abs(v[nocc - 1]) ** 2 / np.sum(np.abs(v[:nocc]) ** 2)) for v in vip]
     j = int(np.argmax(hw))
-    converged = bool(mycc.converged and np.all(eom.converged))
+    converged = bool(mycc.converged and np.atleast_1d(eom.converged)[k])
     return float(et[k]), float(eip[j]), ov[k], hw[j], converged
 
 

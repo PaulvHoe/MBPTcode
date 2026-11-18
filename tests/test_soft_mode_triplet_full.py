@@ -7,8 +7,9 @@ the root whose singles overlap the soft direction most, its Davidson seeded with
 (`spin_flip_gap`) is the second reference where EOM-CCSD from the RHF is known to fall short (O3,
 ethylene twisted by 45 degrees or more). What is held:
 
-1. Every EOM-CCSD reference is well defined: CCSD and EOM converged, the matched triplet
-   overlaps d by at least 0.9, the matched IP root has a HOMO weight of at least 0.5. So is
+1. Every EOM-CCSD reference is well defined: CCSD and the matched EOM triplet root converged, the
+   matched triplet overlaps d by at least 0.9, the matched IP root has a HOMO weight of at least
+   0.5. So is
    every spin-flip reference: d's leading pair carries at least 0.9 of d, the M_s = 1 ROHF
    seeded with that pair keeps its singly occupied orbitals on it (at least 0.9), ROHF, UCCSD
    and the spin-flip roots converged, and the singlet lies below the triplet.
