@@ -17,7 +17,10 @@ split's; everything else is that route's own: the singlet TDHF modes from
 `GW.self_energy.SelfEnergySolver` with a bare vertex, and the root from the one root finder
 (`Solvers.qp_equation.solve_qp_equation_scan`, which scans about the HF energy as the Casida
 route does, here with the pole form's exact slope). With model=None the triplet list is the
-plain TDHF one, the house route's spectrum.
+plain TDHF one, the house route's spectrum; path='relaxed' quantizes the soft modes along their
+relaxed paths (`LinearResponse.soft_mode.relaxed_path`) instead of the straight ones, and
+model='gcm' by the generator-coordinate model on the straight path
+(`LinearResponse.soft_mode.gcm_levels`).
 
 Energies are in Hartree.
 """
@@ -28,7 +31,7 @@ from src.SingleReference.common.eri_blocks import mo_eri
 from src.SingleReference.GW.self_energy import TRIPLET_VERTEX_MODES, SelfEnergySolver
 from src.SingleReference.LinearResponse.casida import CasidaSolver
 from src.SingleReference.LinearResponse.linear_response import LinearResponseSolver
-from src.SingleReference.LinearResponse.soft_mode import (MODELS, check_reference,
+from src.SingleReference.LinearResponse.soft_mode import (MODELS, check_path, check_reference,
                                                           soft_mode_triplets)
 from src.Solvers.qp_equation import solve_qp_equation_scan
 
@@ -43,7 +46,7 @@ def _pole_equation(res, pol, a):
     return residual, slope
 
 
-def soft_mode_qp(mf, selfenergy='PSD2', states=None, model='1d'):
+def soft_mode_qp(mf, selfenergy='PSD2', states=None, model='1d', path='straight'):
     """Quasiparticle energies (Ha) of a triplet-carrying PSD self-energy on TDHF screening, its
     soft triplet modes replaced by their collective levels: a dict with
 
@@ -52,13 +55,16 @@ def soft_mode_qp(mf, selfenergy='PSD2', states=None, model='1d'):
     triplets          the `LinearResponse.soft_mode.soft_mode_triplets` record (None for model=None)
     numerical_flags   the root finder's ('no_root', 'z_outside') and the split's
 
-    selfenergy is one of `GW.self_energy.TRIPLET_VERTEX_MODES`; model is '1d' or '3d', or None
-    for the plain TDHF triplets (refused past the instability, as the house route refuses).
+    selfenergy is one of `GW.self_energy.TRIPLET_VERTEX_MODES`; model is '1d', '3d' or 'gcm', or
+    None for the plain TDHF triplets (refused past the instability, as the house route refuses);
+    path is 'straight' or 'relaxed' (with model '1d' only; with 'gcm' NotImplementedError), as in
+    `LinearResponse.soft_mode.soft_mode_triplets`.
     """
     if selfenergy not in TRIPLET_VERTEX_MODES:
         raise ValueError(f'selfenergy = {selfenergy!r}: one of {TRIPLET_VERTEX_MODES}')
     if model is not None and model not in MODELS:
         raise ValueError(f'model = {model!r}: one of {MODELS}, or None')
+    check_path(path, model)
     nocc = check_reference(mf)
     eps = np.asarray(mf.mo_energy)
     states = [nocc - 1] if states is None else [int(p) for p in states]
@@ -73,7 +79,7 @@ def soft_mode_qp(mf, selfenergy='PSD2', states=None, model='1d'):
             om_t, X_t, Y_t = (np.asarray(v) for v in CasidaSolver(
                 *lr.build_casida_matrices(nocc, lBSE=True, triplet=True)).solve())
         else:
-            rec = soft_mode_triplets(mf, model)
+            rec = soft_mode_triplets(mf, model, path)
             om_t, X_t, Y_t = rec['omega'], rec['X'], rec['Y']
         se = SelfEnergySolver(eps, eri_chemist=eri, spin_mode='restricted', eta=0.0)
         w_qp, z_qp = [], []

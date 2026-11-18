@@ -2982,3 +2982,137 @@ SOFT_MODE_WEIGHT_CUT = 1e-14
 # ethylene and O3 at equilibrium, 1e-6 for N2.
 SOFT_MODE_EDGE_FRACTION = 0.1
 SOFT_MODE_EDGE_WEIGHT_MAX = 1e-2
+# The relaxed collective path (path='relaxed', `LinearResponse.soft_mode.relaxed_path`): at each
+# Q the UHF energy minimised over the full real triplet rotation kappa with e^T kappa = Q and the
+# other soft modes held at zero. SOFT_MODE_RELAXED_POINTS samples per half-period L = pi / sigma_1
+# (spacing L / 80, half the straight path's): the path inertia rises steeply just before the
+# antipode of ethylene twisted by 10 to 20 degrees (M = 4.8 M0 at Q*), where L / 40 leaves its
+# level 0.004 to 0.008 eV low (ethylene@20: 4.2506, 4.2542 and 4.2541 eV with L / 40, L / 80 and
+# L / 160); on the 14 small systems of the tweak study L / 40 and L / 80 agree to 2e-5 eV (N2,
+# whose relaxation is frozen where its branch is lost, to 2e-4 eV).
+SOFT_MODE_RELAXED_POINTS = 81
+# The path runs SOFT_MODE_RELAXED_PAST samples past the first sample beyond its antipode Q* (the
+# leading pair of kappa turned by 90 degrees; Q* / L = 0.997 to 1.047 on the small systems), so
+# SOFT_MODE_RELAXED_PAST + 1 beyond Q* (H2/cc-pVDZ at 1.0 and 1.5 A: 4 of its 85 samples), and
+# the cubic spline of kappa is two-sided there. The inertia at a sample comes from that spline when
+# SOFT_MODE_RELAXED_TRUST relaxed samples lie beyond it; at a Q* closer to the end of the path
+# (one that leaves its branch just past the antipode, as ethylene twisted by 5 to 25 degrees
+# does) it comes from fresh minima at Q* -+ delta, delta = SOFT_MODE_RELAXED_TANGENT_STEP times
+# the spacing, minimised to SOFT_MODE_RELAXED_TANGENT_GRADIENT so that their rounding over
+# 2 delta stays near 1e-6 of the tangent (ethylene@20: 4.2542 eV, where the one-sided spline
+# gives 4.2537 and L / 160 4.2541). A path that has not reached its antipode by
+# SOFT_MODE_RELAXED_REACH half-periods is frozen there (none came near: 1.05 L at most).
+SOFT_MODE_RELAXED_PAST = 3
+SOFT_MODE_RELAXED_TRUST = 2
+SOFT_MODE_RELAXED_TANGENT_STEP = 0.125
+SOFT_MODE_RELAXED_TANGENT_GRADIENT = 1e-9
+SOFT_MODE_RELAXED_REACH = 2.0
+# The constrained minimisation: L-BFGS (SOFT_MODE_RELAXED_MEMORY step pairs) in variables
+# whitened by the RHF Hessian Z^T (A + B) Z, converged when the whitened gradient is below
+# SOFT_MODE_RELAXED_GRADIENT (Ha^1/2; the energy then lies about 1e-12 Ha above the minimum)
+# within SOFT_MODE_RELAXED_ITERATIONS steps (else flagged 'soft_mode_path_not_converged'). Every
+# step is cut to SOFT_MODE_RELAXED_STEP_CAP in |kappa|, so that a warm start keeps to its branch:
+# the plane e^T kappa = Q also holds wrap-around points, where pair angles reach 180 degrees and
+# V = 0, and an uncapped continuation fell onto them in N2 from 0.9 L on. A step is backtracked
+# to Armijo's condition (SOFT_MODE_RELAXED_ARMIJO, with SOFT_MODE_RELAXED_ENERGY_SLACK Ha of
+# rounding allowed; SOFT_MODE_RELAXED_LINE_FLOOR the shortest fraction tried), and a step pair
+# enters the memory when s^T y > SOFT_MODE_RELAXED_CURVATURE_FLOOR |s| |y|. These are the values
+# of the prototype the tweak study's audit reproduced; 2 to 10 steps per sample on the small
+# systems.
+SOFT_MODE_RELAXED_GRADIENT = 1e-6
+SOFT_MODE_RELAXED_ITERATIONS = 300
+SOFT_MODE_RELAXED_MEMORY = 20
+SOFT_MODE_RELAXED_STEP_CAP = 0.1
+SOFT_MODE_RELAXED_ARMIJO = 1e-4
+SOFT_MODE_RELAXED_ENERGY_SLACK = 1e-11
+SOFT_MODE_RELAXED_LINE_FLOOR = 1e-6
+SOFT_MODE_RELAXED_CURVATURE_FLOOR = 1e-12
+# A constrained minimum has left the path's branch when its step from the last minimum exceeds
+# SOFT_MODE_RELAXED_JUMP_RATIO times the larger of the step before and the extrapolated step,
+# plus SOFT_MODE_RELAXED_JUMP_SLACK (in |kappa|): along a branch that ratio is 1.37 at most (it
+# grows near the antipode of ethylene twisted by 5 to 30 degrees), while a fall onto a wrap-around
+# point gives 22 to 137 (N2, H2CO and those ethylenes; the 14 small systems and 8 ethylene
+# points at L / 80). `LinearResponse.soft_mode._relaxed_samples` is the only reader.
+SOFT_MODE_RELAXED_JUMP_RATIO = 2.0
+SOFT_MODE_RELAXED_JUMP_SLACK = 0.05
+# The relaxed samples are constrained stationary points, and minima only where the Hessian across
+# the plane is positive: H2CO/cc-pVDZ's path is a constrained saddle from 0.9 L (the lowest
+# eigenvalue of Z^T H Z is -0.006 Ha there, -0.071 Ha at L), along its second triplet (3.37 eV),
+# and N2's from 0.69 L along its 3Delta_u pair (5.01 eV; -0.11 Ha at 0.70 L). A warm start falls
+# from there toward a wrap-around point, and the fresh start from kappa = Q d, which keeps the
+# symmetry of d, stays on the saddle. So `LinearResponse.soft_mode.relaxed_path` probes the lowest
+# curvature at every sample accepted from a fresh start and at the last relaxed sample up to the
+# antipode (`LinearResponse.soft_mode._curvature_probe`): Lanczos with full reorthogonalization
+# over SOFT_MODE_RELAXED_PROBE_VECTORS vectors, from a start drawn with
+# SOFT_MODE_RELAXED_PROBE_SEED, on the Hessian whitened by the RHF's (1 in those units), each
+# Hessian-vector product a central difference of the whitened gradient over
+# SOFT_MODE_RELAXED_PROBE_STEP. With 20 vectors the lowest Ritz value is the dense Hessian's lowest
+# eigenvalue to 1e-5 (H2CO at 0.9 and 1.0 L, N2 at 0.70 L, ethylene and O3 at their antipodes),
+# with 10 it can miss by 5e-3 (H2CO at 0.9 L: -0.029 against -0.035); steps of 1e-3 to 1e-6 and
+# four seeds agree to 1e-6, and the differenced Hessian is symmetric to 5e-8. A probe costs 40
+# energies and gradients (H2CO: 280 of its 1191).
+SOFT_MODE_RELAXED_PROBE_VECTORS = 20
+SOFT_MODE_RELAXED_PROBE_STEP = 1e-4
+SOFT_MODE_RELAXED_PROBE_SEED = 0
+# A Ritz value below -SOFT_MODE_RELAXED_SADDLE_BAR (in units of the RHF curvature) is a negative
+# curvature: the ones found are -0.035 (H2CO at 0.9 L, its onset) to -0.66 (H2CO past its
+# antipode) and -0.94 to -2.9 (N2 at 0.70 to 0.76 L). The TDHF triplet modes outside the soft set
+# that carry SOFT_MODE_RELAXED_HOLD_FRACTION of a negative direction (Omega_n c_n^2 in the RHF
+# Hessian's metric, where the fractions add up to 1), with their degenerate partners, are held at
+# zero besides the other soft modes and the path is followed again, up to
+# SOFT_MODE_RELAXED_HOLD_ROUNDS times (`LinearResponse.soft_mode._saddle_modes`). H2CO holds its
+# mode 1 (3.37 eV, 0.72 to 0.88 of the negative directions) and its modes 2 and 4 (0.66 and 0.80
+# of a second one past the antipode); N2 holds its 3Delta_u pair (0.86) in the first round and
+# its modes 3 to 5 (7.1 to 7.2 eV, past the antipode) in the second. Then neither has a fresh
+# start or a negative curvature, H2CO's level is unchanged (6.44781 eV) and N2's is the
+# symmetric branch's, 6.57186 eV (frozen at 0.76 L without the holds: 6.57225), at 1 to 4
+# threads (the same held modes at each). None of the other small systems, the 29 other ethylene
+# rows of tests/test_soft_mode_variants_full.py (twisted by 5 to 65 degrees, stretched from 1.22
+# to 1.46 A) and BF (cc-pVDZ, aug-cc-pVDZ) holds anything: the lowest Ritz value at their probes
+# is +0.020 to +0.46. A fresh start or a negative curvature left after the last round is flagged
+# ('soft_mode_path_branch').
+SOFT_MODE_RELAXED_SADDLE_BAR = 1e-3
+SOFT_MODE_RELAXED_HOLD_FRACTION = 0.2
+SOFT_MODE_RELAXED_HOLD_ROUNDS = 3
+# The relaxed loop closes at its antipode: the alpha determinants at -Q* and Q* are one (1 minus
+# their overlap at most 2.4e-10, ethylene twisted by 10 degrees) and D(Q*) = 0 (|D(Q*)| at most
+# 5.7e-7, ethylene twisted by 5 degrees) on the systems above. An overlap below
+# SOFT_MODE_RELAXED_CLOSURE_MIN or |D(Q*)| above SOFT_MODE_RELAXED_COUPLING_MAX is flagged
+# ('soft_mode_path_closure'): N2's path frozen at 0.76 L (without the holds) gave 0.972 and
+# +0.026, and the straight path's determinants at +-L overlap by 0.875 to 0.974 for the molecules.
+SOFT_MODE_RELAXED_CLOSURE_MIN = 0.999
+SOFT_MODE_RELAXED_COUPLING_MAX = 1e-3
+# The fresh minima at Q* -+ delta that give the inertia at an antipode the path ends just past are
+# on its branch when each lies within SOFT_MODE_RELAXED_TANGENT_SLACK (in |kappa|) of the spline's
+# guess (`LinearResponse.soft_mode.relaxed_path`; otherwise the spline's tangent is kept and the
+# run flagged 'soft_mode_path_not_converged'): 7e-5 to 1.1e-3 measured, ethylene twisted by 5 to
+# 25 degrees, the only small systems that end there.
+SOFT_MODE_RELAXED_TANGENT_SLACK = 0.05
+# The generator-coordinate model (model='gcm', `LinearResponse.soft_mode.gcm_levels`): Hill-Wheeler
+# on the straight path's determinants at SOFT_MODE_GCM_POINTS midpoints of [-L, L], solved in the
+# even and the odd block of Q -> -Q by canonical orthogonalization, which keeps, block by block, the
+# overlap eigenvalues above SOFT_MODE_GCM_OVERLAP_CUT times the largest (the tweak study's audited
+# values: its 14 small systems, MSE / MAE / max -0.047 / 0.288 / 1.557 eV, are reproduced). One
+# pair (H2) spans exactly two even and one odd state on any grid of three points or more, so its
+# levels move with neither (n = 16 to 64: 1e-14 eV). For the molecules n = 16, 24, 48 and 64 move
+# the first level by at most 2e-3, 5e-4, 4e-4 and 5e-4 eV against n = 32 (N2; H2CO, H2O, ethylene,
+# O3 and the twisted ethylenes 7e-4, 2e-4, 1e-4 and 2e-4), with the same ranks. The overlap's
+# eigenvalues fall off geometrically with no gap for the cut to sit in (H2CO's even block: 1, 5e-1,
+# 2e-3, 1e-6, 3e-10), so the cut, not the grid, sets the multi-pair levels: from 1e-6 to 1e-10 they
+# move by up to 0.07 eV (H2CO 5.650 to 5.721 eV), while the mean absolute error of the 14 systems
+# stays 0.287 to 0.295 eV (MSE -0.047 to -0.029). The excitation and the ranks at each cut of
+# SOFT_MODE_GCM_CUT_SCAN are recorded beside the levels, for that comparison.
+SOFT_MODE_GCM_POINTS = 32
+SOFT_MODE_GCM_OVERLAP_CUT = 1e-8
+SOFT_MODE_GCM_CUT_SCAN = (1e-6, 1e-7, 1e-9, 1e-10)
+# A direction whose second singular value reaches SOFT_MODE_GCM_PAIR_RATIO times its first has
+# degenerate leading pairs, which the straight path turns together: the generator-coordinate model
+# is then neither size-consistent nor spin-pure there, and it is flagged
+# ('soft_mode_gcm_degenerate_pairs'). N2's two pi pairs are degenerate to 1e-11 (its first level
+# 1.56 eV below EOM-CCSD, <S^2> = 0.18 in its even ground state). Two H2 at 1.5 A, 30 A apart
+# (cc-pVDZ), along cos b d_1 + sin b d_2 with d_k on molecule k (sigma = cos b, sin b): 1.845 eV
+# with degenerate pairs against the single molecule's 2.882, still 1.847 and 1.872 eV at sigma_2 /
+# sigma_1 = 0.97 and 0.9 (<S^2> = 0.50 and 0.49), 2.138 at 0.7. The lowest soft modes of the other
+# molecules checked are dominated by one pair: sigma_2 / sigma_1 = 0.07 to 0.10 (H2O 0.07, O3 0.09,
+# H2CO 0.09, ethylene and its twists 0.10).
+SOFT_MODE_GCM_PAIR_RATIO = 0.9

@@ -1,7 +1,7 @@
 """Geometries, recorded references and reference routines for the soft-mode triplet tests.
 
-Not a test file: `test_soft_mode_triplet`, `test_soft_mode_triplet_slow` and
-`test_soft_mode_triplet_full` import it.
+Not a test file: `test_soft_mode_triplet`, `test_soft_mode_triplet_slow`,
+`test_soft_mode_triplet_full` and `test_soft_mode_variants_full` import it.
 
 GEOMETRIES: MP2/cc-pVDZ minima (Angstrom), optimized with geomeTRIC 1.1 on pyscf 2.13.0
 from idealized starting structures (all-trans planar polyenes). `ethylene_geometry` twists
@@ -17,6 +17,27 @@ soft triplet of O3 (3B2) by about -0.36 eV and twisted ethylene by up to -0.18 e
 in STO-3G against FCI, while spin-flip EOM-CCSD stays within 0.07 eV (`spin_flip_gap`).
 
 `eom_ccsd_references` and `spin_flip_gap` compute them again (cluster tier).
+
+EOM_CCSD_ADA_EV and SPIN_FLIP_EV: the EOM-CCSD triplets of hexatriene, octatetraene and the C=C
+stretch past 1.30 A, and the spin-flip EOM-CCSD gaps of O3 and of ethylene twisted by 45, 60 and
+70 degrees, as `test_soft_mode_triplet_full` computed them on the ADA cluster (job 1238268, pyscf
+2.12.1, 17 November 2026; cc-pVDZ, all electrons, the geometries of `geometry`, RHF conv_tol 1e-10,
+CCSD conv_tol 1e-8) and printed them in its table, in eV to the meV. That run's claim 1 (every
+reference well defined: converged and matched to d, and for the spin-flip rows d's leading pair,
+the seeded ROHF on it, convergence and the singlet below) held on every row but O3 and the stretch
+from 1.3145 to 1.42 A, which failed only because the fourth root of the EOM-CCSD triplet Davidson,
+a guess left in the high continuum, did not converge; CCSD and the matched triplet root converged
+everywhere, and claim 1 now reads only those (commit 18e0845).
+
+QUEST_GEOMETRIES, CIPSI_IP_EV and G0W0_HF_IP_EV: BF's first ionization (1 2Sigma+,
+(5 sigma)^-1) at the QUEST geometry (CC3/aug-cc-pVTZ, all electrons), from the ancillary files
+BF.xyz and bf.json of arXiv:2402.13877 (Marie and Loos, J. Chem. Theory Comput. 20, 4751 (2024)):
+CIPSI (their 'sCI', of FCI quality, frozen core, 0 meV uncertainty in aug-cc-pVDZ and
+aug-cc-pVTZ) and G0W0@HF (QuAcK, eta = 1e-3 Ha, the quasiparticle equation not linearized).
+`test_soft_mode_variants_full` reads them, and the ADA references above. The 'FCI' IPs that
+docs/methods/parquet.md compares its Table III runs with (Marie and Loos, J. Chem. Phys. 163,
+194115 (2025)) are not a second reference: all eight are these frozen-core CIPSI aug-cc-pVTZ
+values rounded to 0.01 eV (BF's 11.15 is 11.149), so they are not listed.
 """
 import numpy as np
 import scipy.linalg
@@ -65,6 +86,28 @@ EOM_CCSD = {
     'ethylene~1.2800': (0.1876428861187891, 0.39250377925467683, 0.9948577300398275, 0.00794051034593284),
     'ethylene~1.3000': (0.1795223629847692, 0.389043337063886, 0.9948901237928298, 0.008193570947450388),
 }
+
+#: eV. EOM-CCSD triplets (`eom_ccsd_references`: the root whose singles overlap d most) from the ADA
+#: run of test_soft_mode_triplet_full (job 1238268, pyscf 2.12.1, 17 November 2026), to the meV as
+#: printed; see the module docstring.
+EOM_CCSD_ADA_EV = {
+    'hexatriene': 2.587, 'octatetraene': 2.200,
+    'ethylene~1.3145': 4.729, 'ethylene~1.3200': 4.671, 'ethylene~1.3245': 4.624,
+    'ethylene~1.3295': 4.572, 'ethylene~1.3325': 4.541, 'ethylene~1.3365': 4.500,
+    'ethylene~1.3400': 4.465, 'ethylene~1.3600': 4.265, 'ethylene~1.3800': 4.072,
+    'ethylene~1.4000': 3.886, 'ethylene~1.4200': 3.706, 'ethylene~1.4400': 3.532,
+    'ethylene~1.4600': 3.364,
+}
+#: eV. Spin-flip EOM-CCSD triplet - singlet gaps (`spin_flip_gap`, from the M_s = 1 ROHF seeded with
+#: d's leading pair), the same run: the reference where EOM-CCSD from the RHF falls short.
+SPIN_FLIP_EV = {'O3': 1.513, 'ethylene@45': 2.757, 'ethylene@60': 1.693, 'ethylene@70': 0.974}
+
+#: Angstrom; the QUEST CC3/aug-cc-pVTZ geometry of BF (arXiv:2402.13877, BF.xyz).
+QUEST_GEOMETRIES = {'BF': 'B 0.0000 0.0000 0.0000; F 0.0000 0.0000 1.2685'}
+#: eV, keyed by (molecule, basis as pyscf spells it); see the module docstring. CIPSI from bf.json's
+#: 'sCI' entries (frozen core), G0W0@HF from bf.json's 'GW' entries.
+CIPSI_IP_EV = {('BF', 'aug-cc-pvdz'): 11.054, ('BF', 'aug-cc-pvtz'): 11.149}
+G0W0_HF_IP_EV = {('BF', 'aug-cc-pvdz'): 11.117, ('BF', 'aug-cc-pvtz'): 11.325}
 
 
 def ethylene_geometry(twist=0.0, rcc=None):
