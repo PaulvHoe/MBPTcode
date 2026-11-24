@@ -50,7 +50,7 @@ The relaxed path (path='relaxed', `LinearResponse.soft_mode.relaxed_path`):
     1e-10 (9e-16, 3e-13): V''(0) / M(0) = Omega_s^2. At Q = 4e-3 and 8e-3 the straight point Q d is
     already the constrained minimum to the gradient bar (the gradient across the plane is O(Q^3)
     there), so this part holds the RHF's stationarity and the split's conjugate e, not the
-    relaxation; claims 14 to 16 hold what the relaxation can get wrong.
+    relaxation; claims 14 to 16 and 19 hold what the relaxation can get wrong.
 13. One pair (H2/STO-3G at 1.0 and 2.5 A) has nothing to relax: the relaxed path is the straight
     one, V to 1e-12 Ha (7e-16), M = M to 1e-12 (4e-16), Q* = pi / sigma_1, and its level is the
     straight path's to 1e-5 eV (1.2e-6 measured, the two 1D solvers).
@@ -86,49 +86,69 @@ The relaxed path (path='relaxed', `LinearResponse.soft_mode.relaxed_path`):
     that rejects every step freezes the path at Q = 0 ('soft_mode_path_frozen', the straight
     level to 1e-5 eV), and a closure bar above 1 raises 'soft_mode_path_closure', all
     SoftModePathShort.
+19. A path whose Q turns back before its antipode (butadiene/STO-3G, 26 basis functions, two soft
+    modes of different symmetry, sigma_2 / sigma_1 = 0.58 and 0.93), as hexatriene and
+    octatetraene in cc-pVDZ froze on a cluster (ADA job 1242171). With the continuation switched
+    off (SOFT_MODE_RELAXED_ARC_SECANT = 0) both paths freeze, at 0.81 and 0.74 L, and do not close
+    (overlap 0.839 and 0.649; 'soft_mode_path_frozen' and 'soft_mode_path_closure'), at the levels
+    of the code before the continuation (FROZEN_LEVELS_EV, to 1e-6 eV); that continuation fails at
+    its first step, and the records are those of a run without it (`_continued_samples` returning
+    None) in every field, energy_calls, curvature and held modes included: a failed continuation
+    is not probed and leaves the frozen path and its record as they were. The hold of the other soft
+    mode carries no force along the fixed-plane samples kept (its multiplier below 1e-6: 1.2e-8 and
+    3.1e-8 measured), and along the continued path Q = e^T kappa rises to a maximum before the
+    antipode and falls back (0.8180 and 0.7493 L, against 0.8173 and 0.5466 L at it): a turning
+    point of Q, not the hold. Continued in their arc length both paths reach the antipode
+    unfrozen, converged, with no fresh start and a positive curvature across them (probed on the
+    slices: past the turning point the samples are saddles of their fixed planes), and close
+    (1 - overlap and |D(x*)| below 1e-3; 1e-14 and 4e-15 measured); their inertia in the arc length
+    is M to 1e-2 (4.9e-4 and 2.4e-3 at most) and to 1e-6 at x = 0 (1.6e-9 and 7.5e-10), their
+    levels are this code's record (TURNING_LEVELS_EV) to 1e-4 eV, and the run raises
+    'soft_modes_coupled' only.
 
 The generator-coordinate model (model='gcm', `LinearResponse.soft_mode.gcm_levels`):
 
-19. Its closed-form kernels are the generic non-orthogonal (Loewdin) ones: N, H - E_RHF N, D_alpha
+20. Its closed-form kernels are the generic non-orthogonal (Loewdin) ones: N, H - E_RHF N, D_alpha
     and S^2 between the path's determinants, by `loewdin_kernels` in the RHF MO basis, at eight
     random (Q, Q') to 1e-10 Ha for H (1.7e-13 measured) and 1e-12 for the others (3e-15): H2O and
     N2, and H2O/STO-3G, whose five occupied orbitals outnumber its two virtuals; their diagonal is
     `path_samples`' V and D to 1e-10 (H2O; 3.4e-13 measured).
-20. One pair: H2/STO-3G at 0.75, 1.0, 1.5 and 2.5 A gives the FCI triplet (the house's
+21. One pair: H2/STO-3G at 0.75, 1.0, 1.5 and 2.5 A gives the FCI triplet (the house's
     PyscfFCISolver) to 1e-8 eV (3e-14 measured), as one level; H2/cc-pVDZ at 0.75 to 2.0 A gives
     the CI in the two orbitals {g, v_d} (`casci_two_orbitals`), its gap and coupling to 1e-10
     (5e-14 eV, 6e-16), with spin-pure states (<S^2> = 0 and 2 to 1e-12) whatever the grid (12
     points against 32: 1e-14 eV).
-21. H2/cc-pVDZ against FCI: within 0.25 eV from 0.75 to 2.0 A (-0.227 measured, at 0.75 A), and
+22. H2/cc-pVDZ against FCI: within 0.25 eV from 0.75 to 2.0 A (-0.227 measured, at 0.75 A), and
     closer than the 1D model from 1.0 A on.
-22. Convergence in the number of generator points: 24 and 48 against 32 within 1e-3 eV at the same
+23. Convergence in the number of generator points: 24 and 48 against 32 within 1e-3 eV at the same
     ranks (N2 5.4e-4 and 3.8e-4 measured, H2O 3e-5).
-23. Its harmonic limit is not TDHF's: on the exact kernels V''(0) = mu, the overlap is
+24. Its harmonic limit is not TDHF's: on the exact kernels V''(0) = mu, the overlap is
     exp(-s^2 / 4) at small s = Q - Q', and h2(0) = d^T (A - B) d / 4, all to 1e-5 relative
     (Richardson at s = 4e-3 and 8e-3; 2.5e-7 at most, H2O), so its small-amplitude inertia is the
     Peierls-Yoccoz mass 1/d^T (A - B) d and a harmonic mode comes out (M d^T (A - B) d)^1/2 times
     Omega_s: 1 for H2/STO-3G (to 1e-12; d is an eigenvector of A - B), 1.024 for H2/cc-pVDZ at
     1.0 A and 1.027 for N2.
-24. Molecules: the first level of N2, H2CO, H2O, ethylene and O3 is the tweak study's audited
+25. Molecules: the first level of N2, H2CO, H2O, ethylene and O3 is the tweak study's audited
     prototype's (`GCM_AUDITED`) to 1e-6 eV (7e-13 measured) with its ranks; N2's degenerate pi
     pairs raise 'soft_mode_gcm_degenerate_pairs' (<S^2> = 0.184 in its even ground state, the
     audit's independent value to 1e-3) and the others nothing but O3's 'soft_modes_coupled';
     H2CO and ethylene lie within 0.25 eV of EOM-CCSD (-0.232 and -0.144 measured, where the 1D
     model of claim 9 is +0.69 and +0.52).
-25. `GW.soft_mode_qp` passes model='gcm' through (H2 at 1.0 A: Z > 0.7), whose poles carry the
+26. `GW.soft_mode_qp` passes model='gcm' through (H2 at 1.0 A: Z > 0.7), whose poles carry the
     model's level and coupling (X + Y = sqrt2 c d to 1e-12); the relaxed path with model='gcm' is
     refused with NotImplementedError before any work in both drivers (a UHF reference is refused
     for its path), and model='gcm' in `collective_levels` with ValueError, whose refusal of an
     unknown model names only the models it solves ('1d', '3d').
-26. Flags: N2 raises 'soft_mode_gcm_degenerate_pairs', and an overlap cut of 0.5, which keeps one
+27. Flags: N2 raises 'soft_mode_gcm_degenerate_pairs', and an overlap cut of 0.5, which keeps one
     state per block, 'soft_mode_gcm_few_states', both SoftModeGCMShort.
 
 The reference numbers come from pyscf FCI run here, from EOM-CCSD recorded on a workstation and
 from the spin-flip EOM-CCSD of twisted ethylene that the heavy file computed on the ADA cluster
 (job 1238268; EOM_CCSD and SPIN_FLIP_EV, provenance in tests/soft_mode_references.py); N2's
 symmetric branch and the audited GCM levels come from the soft-mode tweak study
-(N2_SYMMETRIC_BRANCH_EV and GCM_AUDITED), and RELAXED_LEVELS_EV from this code (a regression
-record); the bars hold measured misses at 1 to 4 threads.
+(N2_SYMMETRIC_BRANCH_EV and GCM_AUDITED), and RELAXED_LEVELS_EV, TURNING_LEVELS_EV and
+FROZEN_LEVELS_EV from this code (regression records); the bars hold measured misses at 1 to 4
+threads.
 
 Run: python tests/test_soft_mode_triplet.py, or under pytest.
 """
@@ -219,6 +239,17 @@ RELAXED_PIN_TOL = 1e-4
 #: The closure of a relaxed loop: 1 minus the overlap of the alpha determinants at -+Q*, and
 #: |D(Q*)|; 4e-13 and 3.8e-8 at most measured over the 14 small systems (O3 at 1 to 4 threads).
 CLOSURE_TOL = 1e-3
+#: eV. butadiene/STO-3G's frozen levels with the continuation switched off against those of the
+#: code before it: 2e-10 measured at 1, 2 and 4 threads.
+FROZEN_PIN_TOL = 1e-6
+#: Ha. The force the hold of the other soft mode carries along butadiene/STO-3G's fixed-plane
+#: samples kept, |mu_t| of grad E = lam e + mu_t e_t: 1.2e-8 and 3.1e-8 measured (lam up to 0.43).
+HOLD_FORCE_TOL = 1e-6
+#: The inertia of a path continued in its arc length, |M(x) / M - 1| over [0, x*]: 4.9e-4 and
+#: 2.4e-3 at most measured (butadiene/STO-3G, spacing L / 80; 1.4e-4 and 7.9e-4 at L / 160), and at
+#: x = 0, where the fixed-plane samples are kept: 1.6e-9 and 7.5e-10.
+ARC_INERTIA_TOL = 1e-2
+ARC_ORIGIN_RTOL = 1e-6
 #: Step (in |kappa|) of the central differences of the analytic gradient that build the dense
 #: constrained Hessian: the result is symmetric to 4e-9 Ha (H2CO, O3).
 HESSIAN_STEP = 1e-4
@@ -271,6 +302,14 @@ RELAXED_LEVELS_EV = {'H2@0.75': 10.433259396, 'H2@1.0': 7.431148553, 'H2@1.2104'
                      'N2': 6.571862162, 'H2CO': 6.447809713, 'H2O': 8.398823050,
                      'ethylene': 4.786455298, 'O3': 2.128051723, 'ethylene@45': 2.814563421,
                      'ethylene@60': 1.685533379, 'ethylene@70': 0.895330015}
+#: eV. The relaxed 1D levels of butadiene/STO-3G's two soft modes (B_u and A_g; the MP2/cc-pVDZ
+#: geometry of tests/soft_mode_references.py), continued in their arc length past the turning point
+#: of Q: this code's own, recorded on a workstation (macOS arm64, OpenBLAS 0.3.29, pyscf 2.13.0;
+#: 1, 2 and 4 threads agree to 1e-10 eV), a regression record. FROZEN_LEVELS_EV: the same with the
+#: continuation switched off, where the paths freeze at 0.8125 and 0.7375 L as the code before the
+#: continuation left them (its 3.4951730514 and 5.0680929241 eV).
+TURNING_LEVELS_EV = (3.570698437, 5.085984353)
+FROZEN_LEVELS_EV = (3.495173051, 5.068092924)
 #: Ha. The first GCM level (E_odd,0 - E_even,0) and the (even, odd) ranks of the tweak study's
 #: exact-kernel prototype (gcm_exact/gcm.py: n = 32, cut 1e-8; cc-pVDZ, the MP2 geometries of
 #: tests/soft_mode_references.py, RHF conv_tol 1e-10), whose audit (18 November 2026) found the
@@ -591,9 +630,10 @@ def relaxed_lowest(label):
     return mf, setup, rel, level
 
 
-def patched_relaxed(mf, patch):
-    """(the record of soft_mode_triplets(mf, '1d', 'relaxed') with the module constants in patch
-    set, the `relaxed_path` record of its lowest soft mode, the warnings raised)."""
+def relaxed_all(mf, patch):
+    """(the record of soft_mode_triplets(mf, '1d', 'relaxed') with the module attributes in patch
+    set (constants, or a function replaced), the `relaxed_path` records of its soft modes in their
+    order, the warnings raised)."""
     saved = {k: getattr(SM, k) for k in patch}
     paths, original = [], SM.relaxed_path
 
@@ -611,6 +651,13 @@ def patched_relaxed(mf, patch):
         SM.relaxed_path = original
         for k, v in saved.items():
             setattr(SM, k, v)
+    return rec, paths, caught
+
+
+def patched_relaxed(mf, patch):
+    """(the record of soft_mode_triplets(mf, '1d', 'relaxed') with the module constants in patch
+    set, the `relaxed_path` record of its lowest soft mode, the warnings raised)."""
+    rec, paths, caught = relaxed_all(mf, patch)
     return rec, paths[0], caught
 
 
@@ -843,6 +890,72 @@ def check_relaxed_flags():
             done = (abs(soft['excitation'] * HARTREE_TO_EV - RELAXED_LEVELS_EV['H2@1.0'])
                     < RELAXED_PIN_TOL)
         ok &= check(names == [want] and warned and done, f"{name} raises '{want}'", f'{names}')
+    return ok
+
+
+def check_relaxed_turning():
+    ok = True
+    mf = rhf(GEOMETRIES['butadiene'], 'sto-3g')
+    off = relaxed_all(mf, {'SOFT_MODE_RELAXED_ARC_SECANT': 0})[0]
+    bare = relaxed_all(mf, {'_continued_samples': lambda *args: None})[0]
+    names = [f['flag'] for f in off['numerical_flags']]
+    miss = max(abs(s['excitation'] * HARTREE_TO_EV - want)
+               for s, want in zip(off['soft'], FROZEN_LEVELS_EV))
+    frozen = all(s['frozen_from'] is not None and s['continued_from'] is None for s in off['soft'])
+    where = [round(float(s['frozen_from'] / s['half_period']), 4) for s in off['soft']]
+    overlap = [round(float(s['closure_overlap']), 3) for s in off['soft']]
+    ok &= check(frozen and {'soft_mode_path_frozen', 'soft_mode_path_closure'} <= set(names)
+                and miss < FROZEN_PIN_TOL,
+                'butadiene/STO-3G without the continuation: both relaxed paths frozen and open, at '
+                'the levels of the code before it',
+                f'frozen at Q/L {where}, overlap {overlap}; {miss:.1e} eV')
+    same = len(off['soft']) == len(bare['soft']) and all(
+        a.keys() == b.keys() and all(np.array_equal(a[k], b[k]) if isinstance(a[k], np.ndarray)
+                                     else a[k] == b[k] for k in a)
+        for a, b in zip(off['soft'], bare['soft']))
+    ok &= check(same and names == [f['flag'] for f in bare['numerical_flags']],
+                'butadiene/STO-3G: a continuation that fails at its first step leaves the frozen '
+                'records as they were without it, every field',
+                f"energy calls {[s['energy_calls'] for s in off['soft']]} and "
+                f"{[s['energy_calls'] for s in bare['soft']]}, curvature "
+                f"{[round(s['curvature'], 6) for s in off['soft']]}, held "
+                f"{[s['held_modes'] for s in off['soft']]}")
+    rec, paths, caught = relaxed_all(mf, {})
+    split = SM.soft_split(*SM.triplet_tdhf_matrices(mf))
+    energy = SM._TripletEnergy(mf, mf.mol.nelectron // 2)
+    for s, soft, rel, want in zip(split['soft'], rec['soft'], paths, TURNING_LEVELS_EV):
+        mode = split['modes'][s]
+        rows = np.column_stack([mode['conjugate']] + [split['modes'][t]['conjugate']
+                                                      for t in split['soft'] if t != s])
+        Q = rel['kappa'] @ mode['conjugate']
+        kept = int(np.argmin(np.abs(Q - rel['continued_from']))) + 1
+        force = max(np.abs(np.linalg.lstsq(rows, energy(k)[1], rcond=None)[0][1:]).max()
+                    for k in rel['kappa'][:kept])
+        at_star = float(np.interp(rel['antipode'], rel['q'], Q))
+        turned = Q.max() > at_star and rel['q'][np.argmax(Q)] < rel['antipode']
+        L = soft['half_period']
+        ok &= check(force < HOLD_FORCE_TOL and turned,
+                    f'butadiene/STO-3G mode {s}: the hold of the other soft mode carries no force, '
+                    'and Q turns back before the antipode',
+                    f'{force:.1e} Ha; Q/L {Q.max() / L:.4f} at most, {at_star / L:.4f} at x*')
+        clean = (soft['continued_from'] is not None and soft['frozen_from'] is None
+                 and soft['converged'] and not soft['restarted'].size and soft['curvature'] > 0)
+        shut = max(1.0 - soft['closure_overlap'], abs(soft['coupling_antipode']))
+        inertia = np.abs(rel['mass'] / mode['mass'] - 1).max()
+        origin = abs(rel['mass'][0] / mode['mass'] - 1)
+        miss = abs(soft['excitation'] * HARTREE_TO_EV - want)
+        ok &= check(clean and shut < CLOSURE_TOL and inertia < ARC_INERTIA_TOL
+                    and origin < ARC_ORIGIN_RTOL and miss < RELAXED_PIN_TOL,
+                    f'butadiene/STO-3G mode {s}: continued in its arc length, closed through x*, a '
+                    'minimum across the path on its slices, M(x) = M, at the recorded level',
+                    f"from Q/L {soft['continued_from'] / L:.4f}, x*/L {soft['antipode'] / L:.4f}, "
+                    f"closure {shut:.1e}, curvature {soft['curvature']:+.3f}, M(x)/M - 1 "
+                    f'{inertia:.1e} ({origin:.1e} at 0); {soft["excitation"] * HARTREE_TO_EV:.6f} '
+                    f'eV ({miss:.1e})')
+    names = [f['flag'] for f in rec['numerical_flags']]
+    warned = {w.category for w in caught}
+    ok &= check(names == ['soft_modes_coupled'] and SM.SoftModePathShort not in warned,
+                "butadiene/STO-3G continued: only 'soft_modes_coupled' is raised", f'{names}')
     return ok
 
 
@@ -1119,11 +1232,13 @@ def run():
                       ('17. the relaxed path: soft_mode_qp and refusals',
                        check_relaxed_qp_and_refusals),
                       ('18. the relaxed path: flags', check_relaxed_flags),
-                      ('19. the GCM: kernels', check_gcm_kernels),
-                      ('20-21. the GCM: one pair, H2 against FCI', check_gcm_h2),
-                      ('22-23. the GCM: grid and harmonic limit', check_gcm_grid_and_harmonic),
-                      ('24. the GCM: molecules', check_gcm_molecules),
-                      ('25-26. the GCM: soft_mode_qp, refusals and flags',
+                      ('19. the relaxed path through a turning point of Q (butadiene/STO-3G)',
+                       check_relaxed_turning),
+                      ('20. the GCM: kernels', check_gcm_kernels),
+                      ('21-22. the GCM: one pair, H2 against FCI', check_gcm_h2),
+                      ('23-24. the GCM: grid and harmonic limit', check_gcm_grid_and_harmonic),
+                      ('25. the GCM: molecules', check_gcm_molecules),
+                      ('26-27. the GCM: soft_mode_qp, refusals and flags',
                        check_gcm_qp_refusals_flags)):
         print(f'\n-- {title}')
         ok &= fn()

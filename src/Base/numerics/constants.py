@@ -3088,6 +3088,41 @@ SOFT_MODE_RELAXED_COUPLING_MAX = 1e-3
 # run flagged 'soft_mode_path_not_converged'): 7e-5 to 1.1e-3 measured, ethylene twisted by 5 to
 # 25 degrees, the only small systems that end there.
 SOFT_MODE_RELAXED_TANGENT_SLACK = 0.05
+# A relaxed path whose TV coordinate Q turns back before the antipode (the fixed plane e^T kappa = Q
+# tangent to the path: M(Q) grows without bound and the constrained minimum leaves its branch) is
+# continued in its arc length in the TV metric (`LinearResponse.soft_mode._continued_samples`):
+# the fixed-plane samples are kept while each step stays within SOFT_MODE_RELAXED_ARC_START
+# arc-length steps h (M(Q) below 2.25 M), and the path is followed from the last one kept. The
+# steps grow from h to 3.1 h over the last six samples before hexatriene/STO-3G's first mode
+# freezes (1.28, 1.37, 1.48, 1.68, 2.04, 3.13 h), and the continuation takes over at 0.7375 L there
+# (butadiene/STO-3G 0.7625 and 0.7250 L). The kept samples are the same curve's, so the level does
+# not depend on where the continuation takes over: 1.25, 1.5 and 2.0 move butadiene's and
+# hexatriene's STO-3G levels by 4e-5 eV at most, as does halving the spacing (8e-5 eV).
+SOFT_MODE_RELAXED_ARC_START = 1.5
+# Each continued sample is the minimum on the slice of its normal hyperplane at e^T kappa = Q, to
+# SOFT_MODE_RELAXED_ARC_GRADIENT (Ha^1/2, a tenth of the fixed planes' bar, so that the hyperplane's
+# multiplier nu is resolved), with Q found by a secant search of at most
+# SOFT_MODE_RELAXED_ARC_SECANT minimisations, its first step SOFT_MODE_RELAXED_ARC_SLOPE_STEP times
+# the spacing h when no slope is known yet (the first continued sample; the others start from the
+# last slope). At 1e-6 the secant stalled at |nu| ~ 5e-6, the slice minimum's own rounding, just
+# past hexatriene/STO-3G's second mode's antipode, which then stayed frozen; 1e-7 and 1e-8 give
+# the same levels to 1e-6 eV on butadiene and hexatriene/STO-3G, 1e-8 at 10 % more energies. The
+# searches took 2 to 5 minimisations (2.7 to 3.2 on average) on those paths and octatetraene's.
+# The slope step only seeds the first secant step: 1e-3, 1e-4 and 1e-5 give the same levels to
+# 1e-6 eV on butadiene/STO-3G (3.570698, 5.085984 eV) and hexatriene/STO-3G (2.546786, 4.153217
+# eV), continued from the same samples, with 2.85 and 3.10 minimisations per continued sample (168
+# or 169 over butadiene's 59, 214 over hexatriene's 69).
+# `_continued_samples` also reads four constants of the fixed-plane path, on the arc length x
+# (so `_relaxed_samples` is no longer their only reader): SOFT_MODE_RELAXED_REACH bounds x before
+# the antipode (x* / L = 1.00 to 1.29 measured on butadiene and hexatriene/STO-3G, 0.9997,
+# 1.1768, 1.0509 and 1.2873, octatetraene/STO-3G's first mode 1.1112; the last sample at 1.33 L at
+# most, against the bar's 2 L); SOFT_MODE_RELAXED_PAST plays its role at x*, a two-sided spline
+# there; and SOFT_MODE_RELAXED_JUMP_RATIO and SOFT_MODE_RELAXED_JUMP_SLACK are its branch test,
+# the step ratio along the continued branches 0.69 to 1.02 (butadiene and hexatriene/STO-3G),
+# below the fixed planes' 1.37 at most.
+SOFT_MODE_RELAXED_ARC_GRADIENT = 1e-7
+SOFT_MODE_RELAXED_ARC_SECANT = 12
+SOFT_MODE_RELAXED_ARC_SLOPE_STEP = 1e-4
 # The generator-coordinate model (model='gcm', `LinearResponse.soft_mode.gcm_levels`): Hill-Wheeler
 # on the straight path's determinants at SOFT_MODE_GCM_POINTS midpoints of [-L, L], solved in the
 # even and the odd block of Q -> -Q by canonical orthogonalization, which keeps, block by block, the
@@ -3116,3 +3151,134 @@ SOFT_MODE_GCM_CUT_SCAN = (1e-6, 1e-7, 1e-9, 1e-10)
 # molecules checked are dominated by one pair: sigma_2 / sigma_1 = 0.07 to 0.10 (H2O 0.07, O3 0.09,
 # H2CO 0.09, ethylene and its twists 0.10).
 SOFT_MODE_GCM_PAIR_RATIO = 0.9
+# The sign-aware (Krein) split (reference='excited', `LinearResponse.soft_mode.krein_split`),
+# which admits a closed shell that is a saddle of the Hartree-Fock energy (an excited, non-aufbau
+# reference). `LinearResponse.soft_mode.excited_reference` refuses an occupation whose own Fock
+# matrix has an occupied-virtual element of SOFT_MODE_EXCITED_GRADIENT_MAX (Ha) or more: not
+# stationary (an occupation changed after the SCF), where the split's expansion does not hold.
+# Measured: 1e-13 to 2e-8 for H2/6-31G sigma_u^2 from a symmetry-constrained SCF (conv_tol 1e-12,
+# 0.2 to 3.0 A), 6e-9 to 8e-8 by maximum overlap (conv_tol 1e-9 and 1e-6), 6e-9 and 7e-8 for the
+# aufbau N2 and H2O, against 6.5e-2 and 7.8e-2 for H2's ground-state orbitals at 1.5 A with
+# sigma_u doubly occupied instead (6-31G, cc-pVDZ); pyscf's default convergence (orbital gradient
+# norm below 1e-9^1/2) leaves 1.6e-5 at most.
+SOFT_MODE_EXCITED_GRADIENT_MAX = 1e-4
+# (A - B)(A + B) d = Omega^2 d is solved as a non-symmetric eigenproblem; an eigenvalue whose
+# imaginary part exceeds SOFT_MODE_KREIN_IMAG_TOL times the largest |Omega^2| belongs to a complex
+# quartet (two modes of opposite Krein signature collided) and is refused. Measured on H2/6-31G
+# sigma_u^2 from 0.15 to 3.0 A: exactly 0 wherever the spectrum is real (LAPACK returns a lone real
+# eigenvalue as real; a degenerate real one can come back as a conjugate pair whose imaginary parts
+# are rounding, up to 7e-15 Ha^2 on N2/6-31G's excited closed shell, 3e-17 to 9e-17 on doubled H2
+# blocks, which the bar takes as real and SOFT_MODE_KREIN_RESIDUAL_MAX below makes real set by
+# set), 1.9e-3 to 4.5e-2 on the rows inside the collision windows (the singlet from 0.7625 to
+# 0.77 A, the triplet from 0.945 to 1.01 A; 4.5e-2 at 0.98 A, 1.9e-3 at 0.77 A); a real pair split
+# by rounding next to an exceptional point carries about 1e-8 (the square root of the rounding).
+SOFT_MODE_KREIN_IMAG_TOL = 1e-8
+# A mode of null norm, |M| = |d^T (A - B)^-1 d| below SOFT_MODE_KREIN_NORM_MIN times the largest
+# eigenvalue of |(A - B)^-1| (|d| = 1), sits at an exceptional point, where such a collision
+# begins, and is refused. Measured on H2/6-31G sigma_u^2: 1.5e-2 at the least (0.15 A), 0.3 to 0.6
+# next to the collision windows, so the bar catches the point itself only.
+SOFT_MODE_KREIN_NORM_MIN = 1e-6
+# The modes of (A - B)(A + B) are made real set by set (`LinearResponse.soft_mode._real_modes`):
+# each set of eigenvalues within SOFT_MODE_DEGENERACY_TOL gets a real basis of the span of its
+# eigenvectors' real and imaginary parts, since the two vectors of a degenerate real eigenvalue
+# returned as a conjugate pair share one real part (made real one at a time, one of the two came
+# out of rounding). Every mode returned must solve (A - B)(A + B) d = Omega^2 d to
+# SOFT_MODE_KREIN_RESIDUAL_MAX times the largest |Omega^2| (|d| = 1), else it is refused (a set
+# whose eigenvectors do not span it: a defective eigenvalue). Measured: 2.3e-14 at most with the
+# sets (N2/6-31G's excited closed shell 3sigma_g^2 -> 3sigma_u^2, singlet block; the localized N2+
+# 1s hole in 6-31G and cc-pVDZ, both blocks; cyclobutadiene/STO-3G at D2h and D4h, both blocks;
+# doubled H2/6-31G sigma_u^2 blocks under random rotations), against 2.2e-3 to 0.75 for the
+# columns made real one at a time where LAPACK returned such a pair (3 to 6 regular columns then
+# missed the RPA equations by 0.15 to 8.2 Ha, and one mode of N2's soft pi pair had M = -1.20
+# instead of -12.02).
+SOFT_MODE_KREIN_RESIDUAL_MAX = 1e-6
+# A soft mode counts as isolated from the modes of the other signature when |Omega_s^2 -
+# Omega_n^2| / max(|Omega_s^2|, |Omega_n^2|) is SOFT_MODE_KREIN_GAP or more for each of them;
+# below, the one-mode split leaves out the mixing that leads to a collision, and it is flagged
+# ('soft_mode_krein_neighbour'). Measured on H2/6-31G sigma_u^2: 0.97 or more along the singlet
+# instability (1.2 to 3.0 A) and the short-bond triplet (0.15 to 0.34 A); 0.03 to 0.08 within
+# 0.015 A of the collision windows (the singlet at 0.76, 0.7725 and 0.775 A, the triplet at 0.94
+# and 1.015 A), 0.11 at 0.75 A.
+SOFT_MODE_KREIN_GAP = 0.1
+# The singlet path (`LinearResponse.soft_mode.soft_mode_singlets`) is even in Q where a symmetry of
+# the reference takes d to -d; the parity-blocked models solve the even part of V, so a soft
+# direction with |V(-Q) - V(Q)| above SOFT_MODE_SINGLET_PARITY_MAX times max |V| on [0, L] is
+# refused. Measured: 5e-16 to 4e-14 for the soft modes of H2/6-31G sigma_u^2 and for the lowest
+# singlets of H2O and H2CO (8e-15, 4e-15); at most 1e-13 (H2O/cc-pVDZ) and 1.2e-11 (H2CO/cc-pVDZ
+# at exact C2v) for every direction that is not totally symmetric. The totally symmetric ones form
+# a continuum that the bar lies inside, not a gap: H2O's 33 A1 directions over the whole spectrum
+# measure 7.9e-4 to 0.61 (the lowest four 0.17 to 0.61, 17 between 1e-3 and 3e-2, two core-level
+# ones below the bar), H2CO's 87 at exact C2v 1.4e-4 to 0.45 (the lowest eight 0.04 to 0.45, three
+# core-level ones below the bar), so that a nearly even direction below the bar is quantized as
+# even. The tests' H2CO geometry breaks C2v by about 1e-5 A, so pyscf finds Cs there and counts
+# its in-plane B2 directions as totally symmetric (6e-9 to 9.3e-4; even to 1e-11 at exact C2v).
+# The measure divides by max |V| on [0, L] only, so it depends on the sign of d (H2CO's lowest A1
+# direction: 0.80 or 0.445); no refusal changed with that sign on H2O or H2CO.
+SOFT_MODE_SINGLET_PARITY_MAX = 1e-3
+# The generator-coordinate level that continues an excited reference is picked by its overlap with
+# the reference determinant (`LinearResponse.soft_mode._reference_level`): for a soft mode of
+# positive mass on a block whose A - B is indefinite (level 'overlap') the even ground state is kept
+# unless another even state overlaps the determinant more by over SOFT_MODE_GCM_OVERLAP_MARGIN, and
+# the two even states a level rule picks between ('top': above the even ground state; 'overlap':
+# all) are a near tie, flagged ('soft_mode_reference_tie'), when their overlaps lie within it of
+# each other. Measured (6-31G unless named): the states taken over the even ground state beat it by
+# 0.38 to 0.99 (H4 excited references: square 1.0 A b2u^2 b3u^2 triplet 0.996 against 0.000, whose
+# even ground state, a near-null root of the cut, gave -6.24 eV and now +3.36 eV; rectangular 1.5 x
+# 1.0 A b1u^2 b3g^2 0.959 against 0.003, b1u^2 b2u^2 0.817 against 0.115, ag^2 b3g^2 0.615 against
+# 0.233; LiH/6-311G 1s^2 1pi_x^2 at 3.0 A, its singlet's second soft mode, 0.856 against 0.144), and
+# on the rows kept at the bottom the even ground state leads by 0.36 to 0.99 (square H4 1ag^2 2ag^2
+# 0.676 against 0.312; H2 sigma_u^2's triplet at 0.2 to 0.34 and 0.94 A and singlet at 0.755 and
+# 0.76 A, linear H4 1sigma_g^2 2sigma_g^2 at 1.5 A, LiH 1s^2 1pi_x^2 in 6-31G at 1.6 A and in 6-311G
+# at 3.0 A, rectangular H4's HOMO^2 -> LUMO^2 triplet, square H4's aufbau RHF triplet at 1.5 A,
+# O2/STO-3G's triplet UHF in its spin-conserving block). The near tie: rectangular H4 1.5 x W b1u^2
+# b3g^2's singlet, whose two states above the even ground state share the determinant (0.41 to 0.51
+# each from W = 0.6 to 1.0 A, as FCI's two singlets do, 0.406 / 0.404 at 0.72 A), their overlaps
+# 0.0005 to 0.022 apart where the pick flips with W or over the overlap cuts (0.6 to 0.72 A, the
+# level -4.6 to -5.0 eV or -0.2 to -0.4 eV) and 0.0007 to 0.086 apart from 0.725 to 1.0 A; N2/STO-3G
+# pi_u^4 -> pi_g^4 at 1.3 A, singlet, 0.511 / 0.432; square H4's triplet UHF at 1.2 A, spin-flip
+# block, 0.057 / 0.034; and LiH/6-311G's triplet at 3.0 A, 0.026 / 0.000, where neither holds much
+# of the determinant (the even ground state holds 0.974, flagged too). The rival states of every
+# other row measured lie 0.18 apart at least (square H4's triplet UHF at 1.0 A, spin flip, 0.198 /
+# 0.013).
+SOFT_MODE_GCM_OVERLAP_MARGIN = 0.1
+# Krein collisions with collisions='gcm' (`LinearResponse.soft_mode.krein_pairs`,
+# `LinearResponse.soft_mode.collision_levels`): the two modes of a quartet, or a soft mode and its
+# Krein neighbour (within SOFT_MODE_KREIN_GAP), are quantized together by Hill-Wheeler on the
+# determinants of their real invariant plane, at kappa = r (cos phi_k e_1 + sin phi_k e_2) on
+# SOFT_MODE_COLLISION_DIRECTIONS directions phi_k = k pi / n, each carrying the straight path's
+# SOFT_MODE_GCM_POINTS midpoints of [-L_k, L_k]. One occupied orbital (H2) spans exactly four even
+# and two odd states on any grid of three directions or more: 3, 4, 8 and 16 directions and 16 to
+# 48 points give the same levels to 1e-13 eV (H2/6-31G sigma_u^2, both windows). Two occupied
+# orbitals (linear H4/6-31G on 1sigma_g^2 2sigma_g^2, its singlet quartet at 0.85 A and triplet one
+# at 1.3 A): 3 and 4 directions keep fewer states (ranks 10 to 12 against 15 to 17) and move the two
+# strongest odd levels by up to 1.8 eV, 16 directions by 7e-4 eV and 0 (the triplet gains an even
+# state there, its reference overlap going from 0.60 to 0.55), and 16, 24 or 48 points by 0.02 eV
+# at most. A pair costs 0.2 s (H2), 0.4 s (H4) and 0.6 s (linear H6, three occupied) at 8 x 32
+# points on two threads, 16 directions about 3.5 times that.
+SOFT_MODE_COLLISION_DIRECTIONS = 8
+# The even state kept as the reference's continuation is the one of largest overlap with the
+# reference determinant; when it holds less than SOFT_MODE_COLLISION_OVERLAP_MIN of it, the
+# reference shares its determinant with a doubly excited configuration of the plane, the pick by
+# overlap is near a tie and its levels jump where the kept state switches, and the run is flagged
+# ('soft_mode_collision_reference'). Measured on H2 sigma_u^2: 0.956 to 0.961 around 6-31G's
+# triplet window (rows 0.94 to 1.015 A, the window 0.945 to 1.01 A), 0.52 to 0.93 around its
+# singlet window (rows 0.755 to 0.775 A, the window 0.7625 to 0.77 A; the
+# kept state switches between 0.765 and 0.766 A, at 0.529 / 0.520, and the de-excitation jumps by
+# 0.34 eV), 0.84 to 0.88 in cc-pVDZ's triplet window (1.25 to 1.4 A), 0.88 to 0.92 and 0.50 to 0.51
+# in cc-pVTZ's (0.7 to 0.9 and 1.7 to 1.8 A), 0.51 for its singlet at 0.5 A; linear H4/6-31G 0.48
+# to 0.60. On the rows the flag leaves alone the levels miss FCI by 1.1 eV at most (de-excitation)
+# and 1.5 eV (excitation; for 6-31G's singlet, whose excitation FCI splits between two states,
+# against their centroid); on the flagged ones by up to 9 eV (cc-pVTZ at 1.7 A).
+SOFT_MODE_COLLISION_OVERLAP_MIN = 0.75
+# The open-shell split (`LinearResponse.soft_mode.soft_mode_open_shell`): a soft direction of a
+# UHF's spin-conserving block, and a collision plane there, is quantized by parity-blocked models
+# that solve the even part of V, so a path with |V(-Q) - V(Q)| above
+# SOFT_MODE_OPEN_SHELL_PARITY_MAX times max |V| on [0, L] (no symmetry of the reference takes d to
+# -d) is refused, as SOFT_MODE_SINGLET_PARITY_MAX refuses a closed shell's singlet direction (the
+# spin-flip block is even by the spin rotation of pi about z). Measured on the lowest six to ten
+# spin-conserving modes of He2+/cc-pVDZ (1.08, 2.0, 4.0 A, sigma_g^2 sigma_u UHF), the core hole of
+# N2+/cc-pVDZ localized on one atom, H2O+/6-31G and the high-spin triplet of square H4/6-31G:
+# 5e-16 to 4e-13 for every direction a symmetry takes to minus itself (the soft modes among them),
+# against 1e-2 to 0.27 for most totally symmetric ones (7.7e-3 for H4's) and 1.6e-4 for one of
+# He2+'s at 4.0 A, whose nearly even potential the bar lets through as negligible.
+SOFT_MODE_OPEN_SHELL_PARITY_MAX = 1e-3

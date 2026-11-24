@@ -25,17 +25,32 @@ refuses it (printed, not held).
 Held, each a claim that stands before the run:
 
 1. Every variant returns a finite first level on every row (the triplet rows, and BF's lowest soft
-   mode in both bases), and every relaxed path is followed through its antipode as a constrained
-   minimum: none is frozen or unconverged or takes a sample from a fresh start, the lowest
-   curvature its probe finds across the constraint plane is not below
-   -SOFT_MODE_RELAXED_SADDLE_BAR, and its loop closes (the alpha determinants at -+Q* overlap to
-   1e-3 of 1, |D(Q*)| < 1e-3), so that it raises no 'soft_mode_path_*' flag. On the rows a
-   workstation can run (O3, the twist and the stretch, 48 basis functions at most) and on BF in
-   cc-pVDZ and aug-cc-pVDZ all of this holds, with the overlap within 2.4e-10 of 1 and |D(Q*)| below
-   5.7e-7, and no path holds any mode but the soft ones (H2CO and N2 hold theirs in
-   tests/test_soft_mode_triplet.py). The polyenes and BF/aug-cc-pVTZ were not run here; benzene,
-   whose lowest triplet comes from its degenerate e1g/e2u orbitals, is the likeliest to need held
-   modes or to fail this.
+   mode in both bases), and every relaxed path is followed through its antipode as a minimum across
+   the path: none is frozen or unconverged or takes a sample from a fresh start, the lowest
+   curvature its probe finds across the path is not below -SOFT_MODE_RELAXED_SADDLE_BAR (across the
+   constraint plane, or on the slices of a path continued in its arc length, whose samples past the
+   turning point of Q are saddles of their fixed planes, so that a dense Hessian on the fixed
+   plane, `lowest_constrained_curvature`, does not apply to it), and its loop closes (the alpha
+   determinants at -+Q* overlap to 1e-3 of 1, |D(Q*)| < 1e-3; x* in the arc length of a continued
+   path), so that it raises no 'soft_mode_path_*' flag. On the rows a workstation can run (O3, the
+   twist and the stretch, 48 basis functions at most) and on BF in cc-pVDZ and aug-cc-pVDZ all of
+   this holds, with the overlap within 2.4e-10 of 1 and |D(Q*)| below 5.7e-7, and no path holds any
+   mode but the soft ones (H2CO and N2 hold theirs in tests/test_soft_mode_triplet.py). The
+   polyenes and BF/aug-cc-pVTZ were not run here; benzene, whose lowest triplet comes from its
+   degenerate e1g/e2u orbitals, is the likeliest to need held modes or to fail this. On the cluster
+   (ADA job 1242171) every row held this but hexatriene and octatetraene, whose two soft modes each
+   froze before their antipodes (from 0.80 and 0.78 L the first ones) and did not close: there
+   Q = e^T kappa turns back along the path, the fixed plane loses it, and the path is now continued
+   in its arc length (`LinearResponse.soft_mode._continued_samples`). That is what butadiene/STO-3G
+   holds in tests/test_soft_mode_triplet.py; hexatriene/STO-3G and hexatriene with 6-31G on carbon
+   and STO-3G on hydrogen (62 basis functions, whose two soft modes are of different symmetry like
+   butadiene's and hexatriene's STO-3G ones) close the same way, both modes, with no
+   'soft_mode_path_*' flag. Not run here in cc-pVDZ. Two ways it can still fail, both seen in
+   octatetraene/STO-3G (three soft modes): a soft mode of the first one's symmetry whose hold
+   forbids its closed-shell antipode (the loop continues but closes to 0.979 only,
+   'soft_mode_path_closure'), and a continued path that turns into a saddle across itself before
+   its antipode without a negative curvature for the probe to hold (the path stays frozen as
+   before). The relaxed rows print which soft modes were continued, frozen or left open.
 2. BF in both bases, a stable mode (two degenerate soft modes; Omega_s = 1.52 eV in cc-pVDZ, 1.39
    in aug-cc-pVDZ): the relaxed path relaxes and stays a minimum through Q*, the lowest eigenvalue
    of its dense constrained Hessian at the relaxed sample nearest Q* positive
@@ -63,9 +78,11 @@ Held, each a claim that stands before the run:
 
 Printed for the record, not held: every level and its error, the GCM's (with its ranks, <S^2> of
 the even ground state, coupling c_1, sigma_2 / sigma_1 and the levels over its overlap cuts), the
-relaxed paths' antipode Q* / L, M(Q*) / M, closure overlap, convergence, fresh starts, held modes,
-lowest curvature, freeze and energy calls, every variant's flags and seconds, the mean signed, mean
-absolute and largest errors by group, and BF's IPs and pole strengths Z.
+relaxed paths' antipode Q* / L, M(Q*) / M and D(Q*) (x* / L, M(x*) / M and D(x*) in the arc length
+x of a continued path), closure overlap, convergence, fresh starts, held modes, lowest curvature,
+freeze, continuation in arc length and energy calls (for every soft mode of a row with more than
+one), every variant's flags and seconds, the mean signed, mean absolute and largest errors by
+group, and BF's IPs and pole strengths Z.
 
 Memory per row, estimated (nothing above 60 basis functions runs on a workstation): about twelve
 dense n_ov x n_ov float64 matrices at once (n_ov = n_occ n_virt: the TDHF triplet A and B, the split
@@ -79,10 +96,14 @@ piece in a fresh process: 6.6 n_mo n_ov^2 for a PSD2 call with the plain TDHF tr
 for the relaxed PSD and the G0W0@HF control): about 3 GB at its peak in aug-cc-pVTZ (n_mo 92, n_ov
 595) and 0.3 GB in aug-cc-pVDZ (46, 273).
 
-Run: python tests/test_soft_mode_variants_full.py, or under pytest (about an hour on 16 cores,
-estimated from the small systems' costs, not timed: a relaxed path takes 200 to 470 UHF energies and
-gradients, 1200 and 2400 for H2CO and N2 with their hold rounds, and BF/aug-cc-pVTZ's dense
-constrained Hessian about 1200, each costing as nao^4, so octatetraene's soft modes dominate).
+Run: python tests/test_soft_mode_variants_full.py, or under pytest (about two hours on 16 cores:
+ADA job 1242171 took 86 minutes, where a relaxed path takes 200 to 470 UHF energies and gradients,
+1200 and 2400 for H2CO and N2 with their hold rounds, and BF/aug-cc-pVTZ's dense constrained
+Hessian about 1200, each costing as nao^4, so that octatetraene's soft modes dominate; the
+continuation in arc length about doubles the energies of a path it takes over (butadiene,
+hexatriene and octatetraene in STO-3G: 538, 871, 1765, 2039 and 1448 against 298, 328, 818, 1039
+and 587 frozen), so the polyenes' relaxed paths add about half an hour more, estimated (hexatriene
+and octatetraene took 471 and 1466 s frozen)).
 """
 import os
 import sys
@@ -179,12 +200,15 @@ def variant_text(name, soft):
         frozen = '-' if frozen is None else f"{frozen / soft['half_period']:.3f}"
         curvature = soft['curvature']
         curvature = '-' if curvature is None else f'{curvature:+.3f}'
-        return (f"Q*/L {soft['antipode'] / soft['half_period']:.3f}, M(Q*)/M "
-                f"{soft['mass_ratio_antipode']:.3f}, closure {soft['closure_overlap']:.4f}, D(Q*) "
+        continued = soft.get('continued_from')
+        x = 'Q' if continued is None else 'x'
+        continued = '-' if continued is None else f"{continued / soft['half_period']:.3f}"
+        return (f"{x}*/L {soft['antipode'] / soft['half_period']:.3f}, M({x}*)/M "
+                f"{soft['mass_ratio_antipode']:.3f}, closure {soft['closure_overlap']:.4f}, D({x}*) "
                 f"{soft['coupling_antipode']:+.1e}, converged {soft['converged']}, fresh starts "
                 f"{soft['cold_restarts']} tried, {len(soft['restarted'])} taken, held modes "
                 f"{soft['held_modes']}, lowest curvature {curvature}, frozen from Q/L {frozen}, "
-                f"{soft['energy_calls']} energies")
+                f"continued in arc length from Q/L {continued}, {soft['energy_calls']} energies")
     if name == 'gcm':
         sigma = soft['sigma']
         ratio = sigma[1] / sigma[0] if sigma.size > 1 else 0.0
@@ -216,6 +240,10 @@ def triplet_row(label):
         v = row[name]
         print(f"    {name:9s} {v['level']:7.3f} ({v['level'] - ref:+.3f})  "
               f"{variant_text(name, v['soft'])}; flags {v['flags']}; {v['seconds']:.1f} s",
+              flush=True)
+    for soft in row['relaxed']['softs'][1:]:
+        print(f"      relaxed soft mode {soft['index']}: level "
+              f"{soft['excitation'] * HARTREE_TO_EV:.3f} eV, {variant_text('relaxed', soft)}",
               flush=True)
     return row
 
@@ -338,9 +366,10 @@ def print_groups(rows):
 
 
 def path_clean(soft):
-    """Whether a relaxed record is a constrained minimum through its antipode: unfrozen, converged,
-    no sample taken from a fresh start, no curvature below -SOFT_MODE_RELAXED_SADDLE_BAR at its
-    probes, and a closed loop (CLOSURE_TOL)."""
+    """Whether a relaxed record is a minimum across the path through its antipode (on its fixed
+    planes, or on the slices of a continued path): unfrozen, converged, no sample taken from a
+    fresh start, no curvature below -SOFT_MODE_RELAXED_SADDLE_BAR at its probes, and a closed loop
+    (CLOSURE_TOL)."""
     curvature = soft['curvature']
     return bool(soft['frozen_from'] is None and soft['converged'] and not len(soft['restarted'])
                 and (curvature is None or curvature >= -SOFT_MODE_RELAXED_SADDLE_BAR)
@@ -359,8 +388,9 @@ def check_finite(rows, bf):
         clean = bool(softs) and all(path_clean(soft) for soft in softs)
         detail = ', '.join(f'{n} {x:.3f}' for n, x in zip(VARIANTS, levels))
         ok &= check(np.all(np.isfinite(levels)) and clean,
-                    f"{label}: every variant's level is finite, every relaxed path a closed "
-                    'minimum through Q*', f'{detail} eV; relaxed flags {flags}')
+                    f"{label}: every variant's level is finite, every relaxed path closed and a "
+                    'minimum across the path through its antipode', f'{detail} eV; relaxed flags '
+                    f'{flags}')
     return ok
 
 

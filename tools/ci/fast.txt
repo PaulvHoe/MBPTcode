@@ -540,4 +540,10 @@ pytest test_parquet_result_layout.py
 pytest test_parquet_internals.py
 pytest test_parquet_memory.py
 # the soft-mode split of a TDHF triplet instability (H2 against FCI, small molecules against recorded EOM-CCSD)
-pytest test_soft_mode_triplet.py  # 37 s on two threads on a workstation
+pytest test_soft_mode_triplet.py  # 41.5 s on two threads on a workstation, 40 s on four at load 5 (75 s on four threads of a busy one, load 9 to 15)
+# the sign-aware (Krein) split of excited closed-shell references and the singlet block (H2 sigma_u^2 against FCI)
+pytest test_soft_mode_excited.py  # 9 s on four threads on a workstation at load 4 (24 s on a busy one, load 9 to 15)
+# the two-mode GCM of a Krein collision (H2 sigma_u^2's collision windows against FCI, linear H4)
+pytest test_soft_mode_collisions.py  # 9 s on four threads on a workstation at load 4 (20 s on a busy one, load 9 to 15)
+# the open-shell soft-mode split (He2+ hole localization and H4's spin-flip quartet against FCI, NOCI of localized solutions)
+pytest test_soft_mode_open_shell.py  # 13 s on four threads on a workstation at load 4 (30 s on a busy one, load 9 to 15)
