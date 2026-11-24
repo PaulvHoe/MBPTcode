@@ -30,6 +30,9 @@
 - [Soft-mode triplet instabilities](methods/soft-mode-triplets.md) — the soft
   TDHF triplet modes of an RHF split off the ladder and quantized along the
   RHF→UHF path, and the PSD self-energies on their levels
+- [The FCI vertex split](methods/fci-vertex-split.md) — on a frozen-core
+  active space, the exact ionization energy against G0W@HF with RPA, TDHF,
+  static-BSE and exact (FCI) screening, and the density-relaxation terms
 - [Low-scaling factorization](methods/isdf-low-scaling.md) — the separable RI
   (ISDF) behind the O(N³) routes and ISDF-J/K for the SCF
 - [Environments](methods/environments.md) — polarizable-continuum screening,

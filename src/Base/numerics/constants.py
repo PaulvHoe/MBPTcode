@@ -3282,3 +3282,135 @@ SOFT_MODE_COLLISION_OVERLAP_MIN = 0.75
 # against 1e-2 to 0.27 for most totally symmetric ones (7.7e-3 for H4's) and 1.6e-4 for one of
 # He2+'s at 4.0 A, whose nearly even potential the bar lets through as negligible.
 SOFT_MODE_OPEN_SHELL_PARITY_MAX = 1e-3
+
+# ---------------------------------------------------------------------------
+# src/SingleReference/GW/fci_vertex_split.py: the exact FCI vertex split of G0W
+# quasiparticle energies on a frozen-core active space
+# ---------------------------------------------------------------------------
+# Lanczos depth D of the FCI rung (`SingleReference.GW.fci_vertex_split.fci_vertex_split`, its
+# `depth` default): one spectral measure per orbital q from the density fluctuation O_pq|Psi0>,
+# each a Gauss quadrature of the resolvent with D nodes (no reorthogonalization: ghost copies of a
+# converged pole share its weight and leave the quadrature as it is; every Lanczos vector is kept
+# off |Psi0>, which Q H Q holds at eigenvalue 0, above the active-space spectrum where that is
+# negative (N2/STO-3G; Ne, HF and H2O in 6-31G) and inside it where it reaches above 0 (He, H2,
+# LiH and Ne in cc-pVDZ); the projection removes the direction either way). Error of
+# the G0W_FCI root at D = 30 / 40 against D = 120: N2/STO-3G 2sigma_g 4.4e-9 / 1.5e-12 eV.
+# Measured before the Lanczos vectors were kept off |Psi0> (a spurious Ritz value at 0 then took
+# Gauss nodes at steps rounding decided, and N2's errors were 2.7e-7 / 6e-10 eV), against D = 48
+# to 120 or the dense Lehmann sum: MgO/6-31G sigma 4.7e-7 / 4.0e-9 eV, BeO/6-31G pi 2.3e-7 /
+# 5e-10, LiF/6-31G pi 2.3e-8 / 1e-10; 5e-13 eV or less at D = 30 on H2O, Ar, BeH2, LiH and HF. The
+# check against D/2 (FCI_SPLIT_HALF_DEPTH_BAR) measures the D/2 error, orders of magnitude larger:
+# in that same measurement it flagged BeO pi (1.2e-5 Ha) and MgO sigma (4.4e-5 Ha) at D = 30
+# although both were converged, and no panel case at D = 40 (MgO sigma 3.0e-6 Ha the largest, BeO
+# pi 1.4e-6), for a third more cost (the FCI rung is about 93 % of the wall time); the panel run
+# records these changes again. N2/STO-3G's inner-valence 2sigma_g, a root without a quasiparticle
+# (Z 0.42), moves by 4.2e-5 Ha from D = 20 to 40.
+FCI_SPLIT_SCREENING_DEPTH = 40
+# Lanczos depth of the exact one-hole spectrum a_p,alpha|Psi0> in the (N - 1) sector
+# (`SingleReference.GW.fci_vertex_split.fci_vertex_split`; full reorthogonalization in
+# `SingleReference.ADC.solve.lanczos_extend`: without it the main pole of HF/6-31G's HOMO splits
+# into ghost copies from depth 100 on, its largest weight 0.525 at depth 100 against 0.9353 with).
+# Judged by the main pole's residual bound (FCI_SPLIT_HOLE_RESIDUAL_BAR), which at depth 60 is
+# 4e-14 Ha or less for HF/6-31G, 6e-9 for H2O/STO-3G and 2.4e-6 for N2/STO-3G's inner-valence
+# 2sigma_g (Z 0.56; 3.5e-2 Ha at depth 30; 4.3e-6 in an equally valid run, the same Psi0 on a
+# dense H); MgO/6-31G's main poles move by at most 5e-5 eV from 30 to 60. An (N - 1)-sector step
+# costs a third of an N-sector one at the panel's largest space (0.20 s against 0.68 s, 1.02M and
+# 3.3M determinants), and the hole costs 4 to 15 % of the FCI rung at D = 30 (NH3, Ne, H2O and HF,
+# measured).
+FCI_SPLIT_HOLE_DEPTH = 60
+# The FCI rung's half-depth check (Ha, `SingleReference.GW.fci_vertex_split.fci_vertex_split`):
+# the G0W_FCI quasiparticle root at depth D against D/2, both from the leading block of the same
+# tridiagonal matrix (bitwise a separate D/2 run). A change above FCI_SPLIT_HALF_DEPTH_BAR is
+# flagged ('fci_split_depth_unconverged'). The change bounds the error of the D/2 value; the
+# depth-D error is orders of magnitude smaller (N2/STO-3G's 2sigma_g at D = 40: a 1.1e-3 eV change,
+# a 1.5e-12 eV error; MgO/6-31G sigma at D = 30, before the Lanczos vectors were kept off |Psi0>:
+# 1.2e-3 eV and 4.7e-7 eV), so the flag is conservative. D = 10 against 5 moves the pilot's roots
+# by 3.0e-6 (Ne/cc-pVDZ) to 6.8e-4 Ha (LiH/cc-pVDZ); D = 40 against 20 by 1.4e-10 Ha or less
+# (H2O/6-31G).
+FCI_SPLIT_HALF_DEPTH_BAR = 1e-5
+# The exact hole's Ritz pairs (Ha, `SingleReference.GW.fci_vertex_split.fci_vertex_split`): a Ritz
+# value lies within its residual bound beta_D |U_D-1,k| of a cation energy, so a pole whose bound
+# is below FCI_SPLIT_HOLE_RESIDUAL_BAR is certified as a cation state to within it. A main pole
+# whose bound exceeds the bar is flagged ('fci_split_depth_unconverged'). Above the bar a pole is
+# not certified: it may be a quadrature node standing for unresolved satellites (HF/6-31G's second
+# largest weight sits at 73.9, 72.4 and 72.5 eV at depth 30, 60 and 120, its bound 0.20 Ha at 60)
+# or a converged state whose bound overstates its error, which is about bound^2 / gap (N2/STO-3G's
+# 2sigma_g: its second pole's bound 1.9e-5 Ha, 3e-10 Ha from the dense cation state). Measured at
+# depth 60: main poles 3e-18 to 6e-9 Ha (HF/6-31G, H2O/STO-3G, N2/STO-3G's outer valence), 2.4e-6
+# Ha for N2/STO-3G's 2sigma_g, which a dense diagonalization of the cation puts 1e-10 eV from it;
+# 0 at an invariant subspace (two-electron spaces). The bounds depend on rounding and on Psi0's
+# error, by a factor of 2 at the 1e-6 Ha level (N2's 2.4e-6 is 4.3e-6 in an equally valid run, the
+# same Psi0 on a dense H): a margin of 2 to 4 below the bar there.
+FCI_SPLIT_HOLE_RESIDUAL_BAR = 1e-5
+# The FCI rung's lowest excitation (its `min_omega_ev`,
+# `SingleReference.GW.fci_vertex_split.fci_vertex_split`) is the lowest Ritz value whose weight
+# exceeds FCI_SPLIT_LOWEST_POLE_WEIGHT of the total weight sum_q |Q O_pq Psi0|^2 of
+# Sigma_pp (relative). Without reorthogonalization the states the start vectors do not couple to
+# (triplets, other symmetries) are seeded by rounding and converge with relative weights of 6e-21
+# or less: Ne/6-31G's HOMO the largest measured (7e-24 at D = 40, 5.5e-21 at D = 60 and 80; 1.8e-17
+# at D = 80 before the Lanczos vectors were kept off |Psi0>), 3e-27 or less for LiH/cc-pVDZ (also
+# at 3.0 A: 0.90 eV against the lowest coupled 1.57 eV), He/cc-pVTZ, H2/cc-pVTZ, Ar and BeH2 in
+# 6-31G at D = 40 to 80; H2/cc-pVDZ's triplet sits at 10.68 eV against the lowest coupled singlet
+# at 13.91 eV. The lowest coupled poles measured carry 2.3e-6 of it or more (H2O/STO-3G).
+FCI_SPLIT_LOWEST_POLE_WEIGHT = 1e-12
+# The exact main pole (the one-hole pole of largest weight) is ambiguous, and flagged
+# ('fci_split_main_pole_ambiguous', `SingleReference.GW.fci_vertex_split.fci_vertex_split`), when
+# its weight is QP_WINDOW_Z_MIN or less (no quasiparticle by weight) or when the other Ritz values
+# within FCI_SPLIT_SECOND_POLE_WINDOW (Ha) of it together carry FCI_SPLIT_SECOND_POLE_RATIO of its
+# weight or more: a pole that near could be the one a G0W root lies closest to, the window being
+# about twice the largest split the pilot found (the Sigma side of LiF/6-31G, 1.71 eV = 0.063 Ha).
+# A sum, so that a quadrature node standing for several satellites counts with their total weight.
+# Measured: nothing within the window for the valence orbitals of HF/6-31G, LiH/cc-pVDZ,
+# H2O/STO-3G and N2/STO-3G (main weights 0.82 to 0.96); 0.268 against 0.5 x 0.563 for N2/STO-3G's
+# inner-valence 2sigma_g (a satellite of weight 0.263 2.48 eV away).
+FCI_SPLIT_SECOND_POLE_RATIO = 0.5
+FCI_SPLIT_SECOND_POLE_WINDOW = 0.1
+# pyscf's direct_spin1 Davidson for the FCI ground state
+# (`SingleReference.GW.fci_vertex_split.ground_state`): FCI_CONV_TOL within FCI_SPLIT_MAX_CYCLE
+# iterations, else flagged ('fci_split_ground_not_converged'; measured 11 to 32 iterations up to
+# the panel's 3.3M determinants, MgO/6-31G the most; pyscf's default is 100). Its max_memory is
+# this job's share of a SLURM allocation (`Base.utils.parallel.memory.allocation_max_memory_mb`)
+# and off SLURM FCI_SPLIT_MAX_MEMORY_MB (MB of 1e6 bytes), past which pyscf keeps its subspace on
+# disk; the same allowance bounds the memory pre-flight below.
+FCI_SPLIT_MAX_CYCLE = 300
+FCI_SPLIT_MAX_MEMORY_MB = 8000
+# The memory pre-flight (`SingleReference.GW.fci_vertex_split.check_memory`) refuses, before any
+# work, an active space whose peak exceeds that allowance: the larger of the Davidson's
+# FCI_SPLIT_DAVIDSON_VECTORS N-sector vectors (27 to 31 measured up to the panel's 3.3M
+# determinants, 0.72 to 0.82 GB there) and the hole's Lanczos basis, FCI_SPLIT_HOLE_COPIES times
+# FCI_SPLIT_HOLE_DEPTH (N - 1)-sector vectors (the house Lanczos stacks its stored vectors at every
+# step, so the list, the previous stack and the new one are alive at once: NH3/6-31G 504 MB under
+# tracemalloc against 3 x 60 x 2.9 MB; 1.47 GB at the panel's 1.02M determinants). The FCI rung
+# holds about seven N-sector vectors. LiF or BeO in 6-31G with ncore = 1 (38M determinants in N)
+# would need about 21 GB.
+FCI_SPLIT_DAVIDSON_VECTORS = 32
+FCI_SPLIT_HOLE_COPIES = 3
+# The active Fock matrix h1 + 2 J - K of the CASCI integrals must be diag(mo_energy[ncore:]) to
+# FCI_SPLIT_FOCK_BAR (Ha, `SingleReference.GW.fci_vertex_split.active_hamiltonian`), else flagged
+# ('fci_split_fock_not_diagonal'): the split's G0 and its rungs take the HF energies as canonical.
+# pyscf's default SCF convergence (1e-9 Ha) leaves 2.5e-7 to 4.0e-7 Ha (HF, H2O, LiF, BeO in
+# 6-31G), conv_tol = 1e-12 9e-10 to 6.9e-8 Ha (the panel, MgO the most).
+FCI_SPLIT_FOCK_BAR = 1e-6
+# <S^2> of the reference state |Psi0> above FCI_SPLIT_SPIN_SQUARE_BAR is flagged
+# ('fci_split_ground_not_singlet', `SingleReference.GW.fci_vertex_split.ground_state`): the
+# M_s = 0 space holds the triplets too, and the split assumes the singlet. Measured 6e-17
+# (HF/6-31G) to 5e-16 (MgO/6-31G, whose lowest triplets, a degenerate pair, lie 0.34 eV above in
+# a three-root M_s = 0 Davidson). It reads |Psi0>'s own spin only. pyscf's default guess is the
+# determinant of lowest diagonal energy, the closed-shell HF determinant for every panel system,
+# and from it the Davidson keeps the guess's spatial and alpha-beta symmetry, so a lower triplet
+# is not reached from the HF determinant and goes unflagged (MgO/STO-3G with ncore = 6: its 3Pi
+# lies 0.234 eV below |Psi0>, <S^2> 8e-15). A triplet the solver does reach is flagged: from an
+# open-shell guess (C2/STO-3G, ncore = 4, whose lowest level is a degenerate triplet pair) or by
+# pyscf's exact diagonalization of 400 determinants or fewer (O2 as an RHF singlet in STO-3G,
+# ncore = 4); <S^2> = 2.0 for both.
+FCI_SPLIT_SPIN_SQUARE_BAR = 1e-6
+# Reused by `SingleReference.GW.fci_vertex_split`, each with its reader there: FCI_CONV_TOL (the
+# ground state's Davidson, `SingleReference.GW.fci_vertex_split.ground_state`); QP_DEGENERACY_TOL
+# (the degenerate level of `SingleReference.GW.fci_vertex_split.level_members`, the house's one
+# separation, which picks the default HOMO-1 level, and of
+# `SingleReference.GW.fci_vertex_split.check_core`, which refuses an ncore that splits a degenerate
+# occupied level); QP_WINDOW_Z_MIN (a G0W rung's root at or
+# below it is no quasiparticle, flagged 'fci_split_rung_no_quasiparticle', and an exact main pole
+# at or below it is ambiguous: less than half the spectral weight either way);
+# ACTIVE_SPACE_VERTEX_TOL (a start vector O_pq|Psi0> whose norm is below it carries no pole of the
+# FCI rung, as an absent vertex).

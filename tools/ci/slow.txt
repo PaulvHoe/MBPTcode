@@ -184,3 +184,5 @@ pytest test_parquet_restricted_vs_quack_slow.py
 pytest test_parquet_so_vs_quack_slow.py
 pytest test_parquet_qp_solver_slow.py
 pytest test_soft_mode_triplet_slow.py  # ethylene twist and C=C stretch, butadiene, benzene: 47 s on two threads on a workstation
+# the exact FCI vertex split on the pilot's larger cases: slow by the 60 s rule (workstation wall times, 2 threads: about 170 s alone)
+pytest test_fci_vertex_split_slow.py  # H2O/6-31G, Ne/cc-pVDZ and NH3/6-31G against the pilot: about 170 s on two threads on a workstation

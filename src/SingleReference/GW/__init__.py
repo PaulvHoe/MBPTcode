@@ -36,12 +36,18 @@
     soft_mode_qp.py           the PSD self-energies on TDHF screening with the
                               soft triplet modes replaced by their collective
                               levels (LinearResponse/soft_mode.py)
+    fci_vertex_split.py       the exact FCI vertex split of G0W@HF ionization
+                              energies on a frozen-core active space: the
+                              exact one-hole main pole against G0W with RPA,
+                              TDHF, static-BSE and FCI screening, and the
+                              density side (the screened tadpole T_c)
 
 Every quasiparticle equation is solved by the one root finder,
 `Solvers.qp_equation.find_qp_root`. Every symmetric eigenproblem goes through
 the one symmetric Davidson, `Solvers.davidson.solve_symmetric` (ADC, the
 Tamm-Dancoff BSE, the (A - B) probe). The exceptions, each because its problem
-is not one a symmetric Davidson can take:
+is not one a symmetric Davidson can take, or, for an FCI, because it is
+pyscf's own FCI solver:
   LinearResponse/davidson.py  the full Casida/BSE problem (B != 0): paired, and
                               its symmetric forms need (A - B)^1/2, which a
                               matrix-free action does not give; its trial
@@ -50,4 +56,14 @@ is not one a symmetric Davidson can take:
                               possibly complex
   CC/eom.py                   EOM-CC: non-Hermitian biorthogonal (pyscf
                               davidson_nosym1)
+  GW/fci_vertex_split.py      the active space's FCI ground state: pyscf's
+                              direct_spin1 Davidson, the engine
+                              `Solvers.active_space_solver.PyscfFCISolver`
+                              wraps, called directly for its converged
+                              flag, max_cycle and max_memory, which the
+                              wrapper does not expose; and its Lanczos
+                              spectral measures, of the hole and of the
+                              density response, which are no eigenproblems:
+                              Gauss quadratures of a resolvent from one
+                              start vector, read off a tridiagonal matrix
 """

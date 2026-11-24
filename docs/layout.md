@@ -106,7 +106,9 @@ src/SingleReference/
                                sum-over-poles, the reaction field's shift,
                                the dense quasi-boson route, the PSD
                                self-energies on the soft-mode triplet
-                               spectrum (soft_mode_qp.py)
+                               spectrum (soft_mode_qp.py), the exact FCI
+                               vertex split of G0W@HF ionization energies
+                               on an active space (fci_vertex_split.py)
     LinearResponse/            Casida, RPA, the Casida Davidson, RPA
                                correlation energies, the BSE(2) kernel, the
                                soft-mode split of a TDHF triplet instability

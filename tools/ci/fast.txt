@@ -547,3 +547,5 @@ pytest test_soft_mode_excited.py  # 9 s on four threads on a workstation at load
 pytest test_soft_mode_collisions.py  # 9 s on four threads on a workstation at load 4 (20 s on a busy one, load 9 to 15)
 # the open-shell soft-mode split (He2+ hole localization and H4's spin-flip quartet against FCI, NOCI of localized solutions)
 pytest test_soft_mode_open_shell.py  # 13 s on four threads on a workstation at load 4 (30 s on a busy one, load 9 to 15)
+# the exact FCI vertex split of G0W@HF ionization energies (dense Lehmann sums, the house's G0W routes, a dense cation, the pilot's numbers): placed by the 60 s rule on workstation wall times (2 threads)
+pytest test_fci_vertex_split.py  # 25 s on two threads on a workstation
