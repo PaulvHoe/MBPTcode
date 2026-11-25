@@ -30,6 +30,10 @@
 - [Soft-mode triplet instabilities](methods/soft-mode-triplets.md) — the soft
   TDHF triplet modes of an RHF split off the ladder and quantized along the
   RHF→UHF path, and the PSD self-energies on their levels
+- [Hedin's equations, cycle by cycle](methods/hedin-cycles.md) — four vertex
+  schemes (SG-I/L, SG-Γ/W, cycle-based Γ/W and I/L) from a Hartree or HF
+  start, one cycle loop for every backend, and their zero-dimensional diagram
+  counts
 - [The FCI vertex split](methods/fci-vertex-split.md) — on a frozen-core
   active space, the exact ionization energy against G0W@HF with RPA, TDHF,
   static-BSE and exact (FCI) screening, and the density-relaxation terms

@@ -117,6 +117,13 @@ src/SingleReference/
                                solve_bse_isdf, solve_bse_df); the dense
                                quasi-boson BSE; the upfolded BSE; BSE(2) and
                                its quasiparticle sequences
+    HedinCycles/               Hedin's equations iterated cycle by cycle with
+                               four vertex schemes (SG-I/L, SG-Gamma/W and the
+                               two cycle-based ones) from a Hartree or HF
+                               start: the cycle loop written against the
+                               operations of algebra.py, and the
+                               zero-dimensional backend (diagram counts and
+                               0-D values)
     Parquet/                   the parquet approximation of Marie and Loos,
                                ported from Quack: FLEX, osPA, evPA and qsPA,
                                closed shell (restricted.run_parquet) and in

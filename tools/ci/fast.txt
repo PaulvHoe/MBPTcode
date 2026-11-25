@@ -549,3 +549,5 @@ pytest test_soft_mode_collisions.py  # 9 s on four threads on a workstation at l
 pytest test_soft_mode_open_shell.py  # 13 s on four threads on a workstation at load 4 (30 s on a busy one, load 9 to 15)
 # the exact FCI vertex split of G0W@HF ionization energies (dense Lehmann sums, the house's G0W routes, a dense cation, the pilot's numbers): placed by the 60 s rule on workstation wall times (2 threads)
 pytest test_fci_vertex_split.py  # 25 s on two threads on a workstation
+# the Hedin cycles in zero dimensions (exact and 50-digit arithmetic against the theory repository's reference values)
+pytest test_hedin_cycles_zero_d.py  # 2 s under pytest on one thread (0.6 s as a script)
