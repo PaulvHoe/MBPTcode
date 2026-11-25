@@ -35,7 +35,10 @@
    misses by 40-83 meV, far outside these bars.
 4. second_order_bse(mf, eps=<sequence>) is second_order_bse on that
    sequence's energies, carries its record, and collects its named flags;
-   the refusals.
+   with tda=True and qp_tda=False it is second_order_bse with tda=True on the
+   full sequence's energies (the TDA in the final cycle only, its W0 included),
+   and with tda=True, qp_tda=True gives the default run (None follows tda), the
+   TDA sequence differing from the full one at the HOMO and LUMO; the refusals.
 
 Run: python tests/test_second_order_qp.py, or under pytest.
 """
@@ -361,6 +364,7 @@ def check_against_ams(mf):
 
 def check_sequence_into_bse(mf):
     ok = True
+    named_of = {}
     for name, kernel, tda in (('Sigma_TDHF@L_TDHF', 'v', True),
                               ('Sigma_BSE@L_BSE', '2sosex', False)):
         named = quiet(second_order_bse, mf, eps=name, kernel=kernel, tda=tda,
@@ -374,6 +378,28 @@ def check_sequence_into_bse(mf):
                     and np.array_equal(named['eps'], seq['eps'])
                     and len(named['qp']['cycles']) == len(SQ.QP_SEQUENCES[name]),
                     f'second_order_bse(eps={name!r}) runs the sequence first')
+        named_of[name] = named
+    # the TDA in the final cycle only: the sequence full, the BSE(2) and its W0 in the TDA
+    for name, kernel in (('Sigma_TDHF@L_TDHF', 'v'), ('Sigma_BSE@L_BSE', '2sosex')):
+        last = quiet(second_order_bse, mf, eps=name, kernel=kernel, tda=True, qp_tda=False,
+                     dynamical_roots=3)
+        full = quiet(SQ.qp_sequence, mf, name, tda=False)
+        given = quiet(second_order_bse, mf, eps=full['eps'], kernel=kernel, tda=True,
+                      dynamical_roots=3)
+        ok &= check(np.array_equal(last['omega'], given['omega'])
+                    and np.array_equal(last['dynamical']['omega'], given['dynamical']['omega'])
+                    and np.array_equal(last['W_aux'], given['W_aux'])
+                    and last['qp']['tda'] is False and np.array_equal(last['eps'], full['eps']),
+                    f'qp_tda=False runs {name} full and only the final BSE(2) in the TDA')
+    tdhf = named_of['Sigma_TDHF@L_TDHF']
+    same = quiet(second_order_bse, mf, eps='Sigma_TDHF@L_TDHF', kernel='v', tda=True,
+                 qp_tda=True, dynamical_roots=3)
+    full = quiet(SQ.qp_sequence, mf, 'Sigma_TDHF@L_TDHF', tda=False)
+    nocc = mf.mol.nelectron // 2
+    moved = (full['eps'] - tdhf['eps'])[nocc - 1:nocc + 1] * HARTREE_TO_EV * 1e3
+    ok &= check(np.array_equal(same['omega'], tdhf['omega']) and np.all(np.abs(moved) > 1.0),
+                'with tda=True, qp_tda=True = the default (None), and the TDA moves the sequence',
+                f'HOMO, LUMO full - TDA {moved[0]:+.1f}, {moved[1]:+.1f} meV')
     # a kept root of low weight raises its flag into both records
     res = quiet(second_order_bse, mf, eps='Sigma_TDHF@L_TDHF', kernel='v', tda=True,
                 dynamical_roots=1)
@@ -394,6 +420,8 @@ def check_sequence_into_bse(mf):
          'a reference not run'),
         (lambda: SQ.fermi_level(np.array([-0.5, 0.2, 0.1]), 2), ValueError,
          'a HOMO above the LUMO'),
+        (lambda: second_order_bse(mf, eps=mf.mo_energy, qp_tda=False), ValueError,
+         'qp_tda without a named sequence'),
     ]
     for call, exc, what in refusals:
         try:

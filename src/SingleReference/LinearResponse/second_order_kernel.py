@@ -18,6 +18,13 @@ SecondorderADynamic, whose w = 0 limit is the static kernel of the paper's
 Eq. 25; power 2 gives the table with 1/(D - w)^2, which is dA(2)/dw. The pp and hh
 channels are the Fortran's lpp and lhh sums; the paper's 'pp off' drops both.
 
+The fourth ph term of each resolvent, 2(ab|kc)(kc|ij) (RING_TERMS), is the ring:
+the second-order piece v P0 v of the RPA screening of the direct term. An A(1)
+with -(ij|W0|ab) holds it again, as 4 sum_kc (ab|kc)(kc|ij) / (e_c - e_k) (the
+paper's appendix on double counting), and a B(1) with -(ib|W0|ja) its B
+counterpart. rings=False drops both terms from the table, and with them from
+A(2)(w), dA(2)/dw, B(2) (its relabellings) and the mirror.
+
 T is the table, its mirror T~ the table with i <-> a and j <-> b relabelled in the
 integrals (not in the resolvent), and B(2) the table at w = 0 with j <-> b
 (B_p) or i <-> a (B_c) relabelled. The W slots follow one of three rules:
@@ -61,6 +68,8 @@ A_TERMS = (
     ('-2s', 'cbid', 'adjc', False, 'cdij', 'hh'),
     ('1', 'cbid', 'cajd', True, 'cdij', 'hh'),
 )
+#: The two ph ring terms 2(ab|kc)(kc|ij), one per resolvent (module docstring).
+RING_TERMS = (A_TERMS[3], A_TERMS[7])
 MIRROR = (('i', 'a'), ('j', 'b'))
 SWAP_P = (('j', 'b'),)
 SWAP_C = (('i', 'a'),)
@@ -109,11 +118,12 @@ class SecondOrderKernel:
     coeff_df: three-index factors (naux, nmo, nmo) with sum_P B_P,pq B_P,rs = (pq|rs).
     spin: 'singlet' or 'triplet'. rule: one of SLOT_RULES. W_aux: the static W0
     in the whitened auxiliary basis (static_screening_aux) for the screened rules,
-    None for 'v'. channels: a subset of CHANNELS.
+    None for 'v'. channels: a subset of CHANNELS. rings: False drops RING_TERMS
+    from every table (module docstring).
     """
 
     def __init__(self, eps, coeff_df, nocc, spin='singlet', rule='v', W_aux=None,
-                 channels=CHANNELS):
+                 channels=CHANNELS, rings=True):
         if spin not in SPIN_FACTOR:
             raise ValueError(f'spin {spin!r} is not one of {tuple(SPIN_FACTOR)}')
         if rule not in SLOT_RULES:
@@ -129,6 +139,7 @@ class SecondOrderKernel:
         self.s = SPIN_FACTOR[spin]
         self.rule = rule
         self.channels = tuple(channels)
+        self.rings = bool(rings)
         self._eps = {'o': eps[:nocc], 'v': eps[nocc:]}
         coeff_df = np.asarray(coeff_df)
         self._factors = {'v': self._split(coeff_df)}
@@ -219,9 +230,10 @@ class SecondOrderKernel:
 
     def _table(self, swaps, omega, power, x=None, y=None):
         total = 0.0 if x is not None else np.zeros((self.nocc, self.nvirt, self.nocc, self.nvirt))
-        for code, n1, n2, slot, rs, channel in A_TERMS:
+        for term in A_TERMS:
+            code, n1, n2, slot, rs, channel = term
             coef = _coefficient(code, self.s)
-            if channel not in self.channels or coef == 0.0:
+            if channel not in self.channels or coef == 0.0 or (not self.rings and term in RING_TERMS):
                 continue
             total = total + self._term(coef, _relabel(n1, swaps), _relabel(n2, swaps), slot, rs,
                                        omega, power, x, y)

@@ -11,7 +11,15 @@ the sequence's previous cycle: Sigma_TDHF@L_TDHF for BSE(2)@HF, G0F2 for
 BSE(1)@GF2 and Sigma_BSE@L_BSE for BSE(2)@GW, the orbitals staying RHF; naming
 the sequence runs it first (`second_order_qp.qp_sequence`, AMS's cycles and
 root rule). W0 is the static RPA at those same energies, with Tamm-Dancoff
-screening when tda is set, as the paper's TDA runs screen in every cycle.
+screening when tda is set, as the paper's TDA runs screen in every cycle;
+qp_tda sets the sequence's Tamm-Dancoff switch apart from this last cycle's,
+so that tda=True with qp_tda=False keeps the TDA in the final BSE(2) and its W0
+only, on the energies of the full sequence. rings=False drops the kernel's two
+ring terms 2(ab|kc)(kc|ij) (second_order_kernel.RING_TERMS), the second-order
+piece of the RPA screening of the direct term: first_order='screened' with
+rings=False keeps W0 in A(1) and B(1) and removes the double counting that
+the paper's appendix finds between A(1) and A(2), and its counterpart between
+B(1) and B(2).
 
 dBSE(2) takes one renormalized Newton step from each static root (Omega, X, Y),
 normalized as X^T X - Y^T Y = 1:
@@ -45,14 +53,14 @@ def _sym(M):
 
 def second_order_bse(mf, eps=None, kernel='2sosex', spin='singlet', tda=False,
                      channels=CHANNELS, first_order='bare', W_aux=None,
-                     dynamical_roots=30):
+                     dynamical_roots=30, qp_tda=None, rings=True):
     """Static BSE(2) roots and their dBSE(2) correction for a closed-shell RHF.
 
     mf: the converged RHF; its orbitals are kept. eps: the energies on the
     diagonal and in the denominators (Ha, all orbitals), the mean field's when
     None, or the name of a quasiparticle sequence of `second_order_qp.
     QP_SEQUENCES` ('Sigma_TDHF@L_TDHF', 'Sigma_BSE@L_BSE', 'G0F2', 'G0W0'),
-    run first with the same tda and its last cycle's energies used.
+    run first and its last cycle's energies used.
     kernel: the W-slot rule of SecondOrderKernel ('v' for BSE(2)@HF and
     BSE(1)@GF2, '2sosex' for BSE(2)@GW, 'average'). spin: 'singlet' or
     'triplet'. tda: drop B, and screen W0 in the Tamm-Dancoff approximation.
@@ -60,7 +68,13 @@ def second_order_bse(mf, eps=None, kernel='2sosex', spin='singlet', tda=False,
     'pp off'. first_order: one of FIRST_ORDER. W_aux: the static W0 in the
     whitened auxiliary basis, built at eps when None and the kernel or
     first_order needs it. dynamical_roots: how many of the lowest roots get the
-    dBSE(2) step.
+    dBSE(2) step. qp_tda: the Tamm-Dancoff switch of the sequence eps names
+    (every response of its cycles); None takes tda, as the paper's runs did
+    (tda=True: the TDA in every cycle). tda=True with qp_tda=False: the
+    sequence full, the TDA in this last cycle only (B dropped, W0 screened in
+    the TDA). Refused when eps names no sequence. rings: False drops the two
+    ring terms of A(2) and B(2) (module docstring); with first_order='screened'
+    the screened first order without the double counting.
 
     Returns a dict: 'omega' (static roots, Ha), 'X', 'Y' (columns are roots),
     'dynamical' (per corrected root: 'omega' = Omega_dyn, 'delta' = dOmega,
@@ -71,29 +85,32 @@ def second_order_bse(mf, eps=None, kernel='2sosex', spin='singlet', tda=False,
     flags = []
     with collecting(flags):
         out = _second_order_bse(mf, eps, kernel, spin, tda, channels, first_order,
-                                W_aux, dynamical_roots)
+                                W_aux, dynamical_roots, qp_tda, rings)
     out['numerical_flags'] = gathered(flags)
     return out
 
 
 def _second_order_bse(mf, eps, kernel, spin, tda, channels, first_order, W_aux,
-                      dynamical_roots):
+                      dynamical_roots, qp_tda, rings):
     if isinstance(mf, scf.uhf.UHF):
         raise NotImplementedError('BSE(2) is implemented for closed-shell RHF references only')
     if first_order not in FIRST_ORDER:
         raise ValueError(f'first_order {first_order!r} is not one of {FIRST_ORDER}')
+    if qp_tda is not None and not isinstance(eps, str):
+        raise ValueError('qp_tda applies only when eps names a quasiparticle sequence')
     nocc = int(np.count_nonzero(mf.mo_occ > 0))
     coeff_df = np.asarray(get_density_fitting_coefficients(mf.mol, mf))
     qp = None
     if isinstance(eps, str):
-        qp = qp_sequence(mf, eps, tda=tda, coeff_df=coeff_df)
+        qp = qp_sequence(mf, eps, tda=tda if qp_tda is None else qp_tda, coeff_df=coeff_df)
         eps = qp['eps']
     eps = np.asarray(mf.mo_energy if eps is None else eps, dtype=float)
     if W_aux is None and (kernel != 'v' or first_order == 'screened'):
         W_aux = static_screening_aux(eps, coeff_df, nocc, tda=tda)
 
     second = SecondOrderKernel(eps, coeff_df, nocc, spin=spin, rule=kernel,
-                               W_aux=None if kernel == 'v' else W_aux, channels=channels)
+                               W_aux=None if kernel == 'v' else W_aux, channels=channels,
+                               rings=rings)
     A1, B1 = LinearResponseSolver(eps, coeff_df=coeff_df).build_casida_matrices(
         nocc, lBSE=True, W_aux=W_aux if first_order == 'screened' else None,
         triplet=spin == 'triplet')

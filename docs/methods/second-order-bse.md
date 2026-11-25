@@ -103,10 +103,21 @@ treatment of the near dependencies of the diffuse functions).
 
 ## Options
 
-Options: `tda=True` drops B and screens in the TDA; `channels=('ph',)` drops
+Options: `tda=True` drops B and screens in the TDA; `qp_tda` sets the TDA of
+the sequence that `eps` names apart from it (`None`, the default, follows
+`tda`, as the paper's runs did), so that `tda=True, qp_tda=False` runs the
+quasiparticle cycles with full responses and keeps the TDA in the final
+BSE(2) only, its W0 included (a `W_aux` passed in replaces that W0);
+`channels=('ph',)` drops
 the pp and hh ladders (the paper's "pp off"); `first_order='screened'` puts W0
 in the direct term of A(1) and B(1), the double-counting "exch" variant of the
-SI. A root whose renormalization factor is not positive raises the named flag
+SI; `rings=False` drops the kernel's two ring terms, +2(ab|kc)(kc|ij) over
+both ph resolvents (`RING_TERMS`, the fourth ph term of the paper's second-cycle
+kernel), and with them their relabellings in B(2) and their part of the dBSE(2)
+step. `first_order='screened', rings=False` keeps W0 in the first order and
+removes the double counting the paper's appendix finds: the second-order term
+of -(ij|W0|ab) is 4 Σ_kc (ab|kc)(kc|ij) / (ε_c - ε_k), the same integrals as
+that ring term. A root whose renormalization factor is not positive raises the named flag
 `'second_order_bse_zeta_nonpositive'`.
 
 The kernel itself, `SecondOrderKernel` in

@@ -6,7 +6,9 @@ Exact three-index factors (no with_df: the full ERI tensor decomposed), RHF orbi
 1. The tiled DF kernel equals a dense einsum of its twelve-term table on the
    four-index v and W0 built from the same factors -- A(2)(w) at w = 0 and +-0.37
    Ha, dA(2)/dw, the quadratic forms x^T A(2) y, B(2), the ph channel alone -- for
-   the three W-slot rules and both spins; and static_screening_aux equals
+   the three W-slot rules and both spins, also without the ring terms
+   (rings=False), whose removal takes exactly 2(ab|kc)(kc|ij) over both ph
+   resolvents out of A(2)(0); and static_screening_aux equals
    LinearResponseSolver's static W0 (full RPA) and -4 A^-1 (TDA).
 2. H2O/6-31G at HF energies with the static RPA W0, full BSE: the lowest roots of
    the verbatim paper Fortran (makeABmat_BSE and the routines it calls, compiled
@@ -29,6 +31,10 @@ Exact three-index factors (no with_df: the full ERI tensor decomposed), RHF orbi
    kept.
    On QuAcK's own G0F2 energies the v kernel gives QuAcK's BSE@GF2 full static
    roots with the effective static reference (singlets 7.477928, 9.561180, ...).
+7. first_order='screened' with rings=False is A(1) and B(1) with W0 plus the
+   ring-free A(2) and B(2), full and TDA, with its dBSE(2) step on the
+   ring-free kernel, and differs from both the bare first order and the exch
+   variant.
 
 Run: python tests/test_second_order_bse.py, or under pytest.
 """
@@ -44,8 +50,9 @@ from pyscf import gto, scf
 from src.Base.numerics.constants import HARTREE_TO_EV
 from src.Base.pyscf.pyscf_interface import get_density_fitting_coefficients
 from src.SingleReference.ADC.second_order import g0f2_energies
-from src.SingleReference.BSE.second_order_bse import second_order_bse
+from src.SingleReference.BSE.second_order_bse import dynamical_correction, second_order_bse
 from src.SingleReference.LinearResponse import second_order_kernel as SOK
+from src.SingleReference.LinearResponse.casida import CasidaSolver
 from src.SingleReference.LinearResponse.linear_response import LinearResponseSolver
 from tests.pins import CROSS_PATH_RTOL
 
@@ -113,31 +120,34 @@ class DenseTable:
             + e[2][None, None, :, None] + e[3][None, None, None, :]
         return 1.0 / (D - w) ** p
 
-    def table(self, s, swaps=(), screen=True, w=0.0, p=1, channels=SOK.CHANNELS):
+    def table(self, s, swaps=(), screen=True, w=0.0, p=1, channels=SOK.CHANNELS, rings=True):
         nv = self.ev.size
         K = np.zeros((self.no, nv, self.no, nv))
         for code, n1, n2, slot, rs, channel in SOK.A_TERMS:
             if channel not in channels:
                 continue
+            if not rings and code == '2' and (n1, n2) == ('abkc', 'kcij'):
+                continue    # the paper's fourth ph term, +2 (ab|kc)(kc|ij)
             n1r, n2r = SOK._relabel(n1, swaps), SOK._relabel(n2, swaps)
             K += SOK._coefficient(code, s) * np.einsum(
                 f'{n1r},{n2r},{rs}->iajb', self.block(n1r, 'v'),
                 self.block(n2r, 'w' if slot and screen else 'v'), self.resolvent(rs, w, p))
         return K.reshape(self.no * nv, self.no * nv)
 
-    def A(self, rule, s, w=0.0, p=1, channels=SOK.CHANNELS):
+    def A(self, rule, s, w=0.0, p=1, channels=SOK.CHANNELS, rings=True):
         if rule == 'v':
-            return self.table(s, (), False, w, p, channels)
-        T = self.table(s, (), True, w, p, channels) + self.table(s, SOK.MIRROR, True, w, p, channels)
+            return self.table(s, (), False, w, p, channels, rings)
+        T = self.table(s, (), True, w, p, channels, rings) \
+            + self.table(s, SOK.MIRROR, True, w, p, channels, rings)
         if rule == 'average':
             return 0.5 * T
-        return T - self.table(s, (), False, w, p, channels)
+        return T - self.table(s, (), False, w, p, channels, rings)
 
-    def B(self, rule, s):
+    def B(self, rule, s, rings=True):
         if rule == 'v':
-            return self.table(s, SOK.SWAP_C, False)
-        T = self.table(s, SOK.SWAP_P) + self.table(s, SOK.SWAP_C)
-        return 0.5 * T if rule == 'average' else T - self.table(s, SOK.SWAP_C, False)
+            return self.table(s, SOK.SWAP_C, False, rings=rings)
+        T = self.table(s, SOK.SWAP_P, rings=rings) + self.table(s, SOK.SWAP_C, rings=rings)
+        return 0.5 * T if rule == 'average' else T - self.table(s, SOK.SWAP_C, False, rings=rings)
 
 
 def relative(a, b):
@@ -171,6 +181,41 @@ def check_kernel_against_the_dense_table(mf):
         worst = max(worst, relative(K.A(), dense.A('2sosex', s, channels=('ph',))))
     ok &= check(worst < CROSS_PATH_RTOL, 'tiled DF kernel = dense table (A, dA/dw, forms, B, ph only)',
                 f'max rel {worst:.1e}')
+    # rings=False: the same without the paper's fourth ph term in both resolvents
+    worst = 0.0
+    for spin, s in SOK.SPIN_FACTOR.items():
+        for rule in SOK.SLOT_RULES:
+            K = SOK.SecondOrderKernel(mf.mo_energy, B, nocc, spin, rule,
+                                      None if rule == 'v' else W_aux, rings=False)
+            for w, p in ((0.0, 1), (0.37, 1), (-0.37, 1), (0.37, 2)):
+                ref = dense.A(rule, s, w, p, rings=False)
+                worst = max(worst, relative(K.A(w, p), ref),
+                            relative(K.form(x, w, p, y), x @ ref @ y))
+            worst = max(worst, relative(sym(K.B()), sym(dense.B(rule, s, rings=False))))
+        K = SOK.SecondOrderKernel(mf.mo_energy, B, nocc, spin, '2sosex', W_aux, channels=('ph',),
+                                  rings=False)
+        worst = max(worst, relative(K.A(), dense.A('2sosex', s, channels=('ph',), rings=False)))
+    ok &= check(worst < CROSS_PATH_RTOL, 'rings=False kernel = dense table without the ring terms',
+                f'max rel {worst:.1e}')
+    # what rings=False removes from A(2)(0): 2 sum_kc (ab|kc)(kc|ij) [1/(e_b - e_i + e_c - e_k)
+    # + 1/(e_a - e_j + e_c - e_k)], the second-order piece of -(ij|W0|ab) up to its denominator
+    eo, ev = mf.mo_energy[:nocc], mf.mo_energy[nocc:]
+    g = np.einsum('Ppq,Prs->pqrs', B, B)
+    O, V = slice(0, nocc), slice(nocc, None)
+    gap = ev[None, :] - eo[:, None]                         # [k, c] = e_c - e_k
+    D1 = gap[:, :, None, None] + gap[None, None, :, :]      # [i, b, k, c] = e_b - e_i + e_c - e_k
+    ring = 2.0 * (np.einsum('abkc,kcij,ibkc->iajb', g[V, V, O, V], g[O, V, O, O], 1.0 / D1)
+                  + np.einsum('abkc,kcij,jakc->iajb', g[V, V, O, V], g[O, V, O, O], 1.0 / D1))
+    ring = ring.reshape(nocc * ev.size, -1)
+    worst = 0.0
+    for spin in SOK.SPIN_FACTOR:
+        for rule in SOK.SLOT_RULES:
+            Wr = None if rule == 'v' else W_aux
+            full = SOK.SecondOrderKernel(mf.mo_energy, B, nocc, spin, rule, Wr).A()
+            ringless = SOK.SecondOrderKernel(mf.mo_energy, B, nocc, spin, rule, Wr, rings=False).A()
+            worst = max(worst, relative(full - ringless, ring))
+    ok &= check(worst < CROSS_PATH_RTOL, 'rings=False removes 2(ab|kc)(kc|ij) over both ph '
+                'resolvents from A(2)(0), every rule and spin', f'max rel {worst:.1e}')
     # TDA screening: W_aux = 1 + B_ov (-4 A^-1) B_ov^T, A = D + 2 B_ov^T B_ov
     B_ov = B[:, :nocc, nocc:].reshape(B.shape[0], -1)
     gaps = (mf.mo_energy[nocc:][None, :] - mf.mo_energy[:nocc, None]).ravel()
@@ -276,6 +321,39 @@ def check_g0f2_against_quack(mf):
     return ok
 
 
+def check_screened_without_rings(mf):
+    """first_order='screened' with rings=False is A(1) and B(1) with W0 plus the
+    kernel without its ring terms, and differs from both the paper's bare first
+    order and the SI's exch variant (W0 in A(1) with the rings kept)."""
+    nocc = mf.mol.nelectron // 2
+    B = np.asarray(get_density_fitting_coefficients(mf.mol, mf))
+    ok = True
+    for tda in (False, True):
+        res = second_order_bse(mf, kernel='2sosex', first_order='screened', rings=False, tda=tda,
+                               dynamical_roots=3)
+        W, eps = res['W_aux'], res['eps']
+        K = SOK.SecondOrderKernel(eps, B, nocc, 'singlet', '2sosex', W, rings=False)
+        A1, B1 = LinearResponseSolver(eps, coeff_df=B).build_casida_matrices(
+            nocc, lBSE=True, W_aux=W, triplet=False)
+        A = A1 + sym(K.A())
+        Bm = np.zeros_like(A) if tda else B1 + sym(K.B())
+        by_hand = np.asarray(CasidaSolver(A, Bm).solve(tda=tda)[0])
+        dyn = dynamical_correction(K, res['omega'], res['X'], res['Y'], 3, tda)['omega']
+        exch = second_order_bse(mf, kernel='2sosex', first_order='screened', tda=tda,
+                                dynamical_roots=0)['omega']
+        bare = second_order_bse(mf, kernel='2sosex', tda=tda, dynamical_roots=0)['omega']
+        new = res['omega']
+        ok &= check(relative(new[:5], by_hand[:5]) < CROSS_PATH_RTOL
+                    and relative(res['dynamical']['omega'], dyn) < CROSS_PATH_RTOL
+                    and np.abs(new[:3] - exch[:3]).min() > 1e-4 and np.abs(new[:3] - bare[:3]).min() > 1e-4,
+                    f"first_order='screened', rings=False ({'TDA' if tda else 'full'}) = A(1)[W0] "
+                    '+ ring-free A(2), B(2), and dBSE(2) on the ring-free kernel',
+                    'S1-S3 eV bare / exch / screened without rings: '
+                    + ' / '.join(' '.join(f'{x:.3f}' for x in v[:3] * HARTREE_TO_EV)
+                                 for v in (bare, exch, new)))
+    return ok
+
+
 def run():
     warnings.simplefilter('ignore')
     harness = rhf(HARNESS_H2O, '6-31g')
@@ -292,6 +370,8 @@ def run():
     ok &= check_refusals(harness)
     print('\n-- 6. G0F2 and BSE@GF2 against QuAcK')
     ok &= check_g0f2_against_quack(quack)
+    print('\n-- 7. W0 in the first order without the double-counted rings')
+    ok &= check_screened_without_rings(harness)
     print('\nALL PASSED' if ok else '\nFAILURES DETECTED')
     return ok
 
