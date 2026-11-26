@@ -1,8 +1,9 @@
 """The start lines of the Hedin cycles on a System: self-consistent Hartree ('H') or Hartree-Fock ('HF').
 
-Both are solved at zero temperature in spin orbitals by aufbau: the nelec lowest levels of the Fock
-matrix F = h + J[D] (Hartree) or F = h + J[D] - K[D] (Hartree-Fock) are occupied, with D the density
-matrix, J[D]_pq = sum_P B^P_pq tr(B^P D) and K[D] = sum_P B^P D B^P. The chemical potential mu lies in
+Both are solved at zero temperature by aufbau: the nocc lowest levels of the Fock matrix F = h + s J[D]
+(Hartree) or F = h + s J[D] - K[D] (Hartree-Fock) are occupied, with D the density matrix of one spin block,
+s the system's spin (1 for spin orbitals, 2 for a closed shell in spatial orbitals, where nocc = nelec / 2),
+J[D]_pq = sum_P B^P_pq tr(B^P D) and K[D] = sum_P B^P D B^P. The chemical potential mu lies in
 the middle of the gap between the highest occupied and the lowest empty level. A start line without a
 gap (a degenerate, partly filled level, as the Hartree line of a one-electron system has) cannot be
 put on the Matsubara axis at low temperature and is refused.
@@ -32,7 +33,7 @@ def exchange(B, D):
 
 
 def fock(system, D, start):
-    F = system.h + hartree(system.B, D)
+    F = system.h + system.spin * hartree(system.B, D)
     if start == 'HF':
         F = F - exchange(system.B, D)
     return F
@@ -44,7 +45,7 @@ def start_line(system, start, hedin=None):
     hedin = HedinNumerics() if hedin is None else hedin
     if start not in ('H', 'HF'):
         raise ValueError(f"unknown start {start!r}: choose 'H' or 'HF'")
-    nocc = system.nelec
+    nocc = system.nocc
     e, C = np.linalg.eigh(system.h)
     D = C[:, :nocc] @ C[:, :nocc].T
     focks, errors = [], []

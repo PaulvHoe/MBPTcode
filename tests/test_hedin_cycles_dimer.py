@@ -70,14 +70,30 @@ def check(ok, label, detail=''):
 
 
 def exact_inverse(alg, z):
-    """[G_exact(z)]^-1 in the start's orbitals (occupied first), from the Lehmann G at T = 0."""
+    """[G_exact(z)]^-1 in the start's orbitals (occupied first), from the Lehmann G at T = 0. For a closed shell
+    in spatial orbitals (System.spin = 2) the problem is set up in spin orbitals, the occupied ones of both
+    spins first as ExactSelfEnergy needs them, and the spin-up block of the inverse is returned."""
     C = alg.start.C
     h1 = C.T @ alg.system.h @ C
     B = alg.ctx.B.real
+    e, nocc = alg.e, alg.start.nocc
+    if alg.system.spin == 2:
+        n = len(e)
+        up = np.r_[0:nocc, 2 * nocc:n + nocc]                  # spatial k with spin up, then with spin down
+        down = np.r_[nocc:2 * nocc, n + nocc:2 * n]
+        h_so, B_so, e_so = np.zeros((2 * n, 2 * n)), np.zeros((B.shape[0], 2 * n, 2 * n)), np.zeros(2 * n)
+        for idx in (up, down):
+            h_so[np.ix_(idx, idx)] = h1
+            B_so[:, idx[:, None], idx[None, :]] = B
+            e_so[idx] = e
+        h1, B, e, nocc = h_so, B_so, e_so, 2 * nocc
     eri = np.einsum('Ppq,Prs->pqrs', B, B)
     g = eri.transpose(0, 2, 1, 3) - eri.transpose(0, 2, 3, 1)
-    exact = ExactSelfEnergy(alg.e, h1, g, alg.start.nocc)
-    return [np.linalg.inv(exact.green(w, 1.0)) for w in z]
+    exact = ExactSelfEnergy(e, h1, g, nocc)
+    out = [np.linalg.inv(exact.green(w, 1.0)) for w in z]
+    if alg.system.spin == 2:
+        out = [x[np.ix_(up, up)] for x in out]
+    return out
 
 
 def errors(start, U, schemes, eps=(0.0, 0.0)):

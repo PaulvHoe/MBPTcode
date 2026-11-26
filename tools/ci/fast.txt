@@ -559,3 +559,9 @@ pytest test_hedin_cycles_h2.py  # 42 s on one thread
 pytest test_hedin_cycles_explicit_bse.py  # 21 s on one thread
 # the Hedin cycles on the Hubbard dimer (exactness of cycles 1 and 2 against exact diagonalization, at and off half filling, cycle 2 past the RHF instability and at large U)
 pytest test_hedin_cycles_dimer.py  # 53 s on one thread
+# the Hedin cycles' per-cycle diagnostics (TEST_PLAN section 8) against independent numbers on H2/STO-3G
+pytest test_hedin_cycles_diagnostics.py  # 2 s on one thread
+# the Hedin cycles' Hartree term on the linearized density (hartree='linearized'): the electron count, size consistency, exactness, the refusals
+pytest test_hedin_cycles_hartree_option.py  # 27 s on one thread
+# the Hedin cycles in spatial orbitals (spin adaptation) against the spin-orbital runs, every scheme from both starts
+pytest test_hedin_cycles_spin_adapted.py  # 12 s on one thread

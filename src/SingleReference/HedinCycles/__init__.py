@@ -21,7 +21,7 @@ The map of the package:
 
 See docs/methods/hedin-cycles.md.
 """
-from src.SingleReference.HedinCycles.schemes import (SCHEME_NAMES, SCHEMES, STARTS,
+from src.SingleReference.HedinCycles.schemes import (HARTREE, SCHEME_NAMES, SCHEMES, STARTS,
                                                      CycleHistory, run_cycles)
 
-__all__ = ['SCHEMES', 'SCHEME_NAMES', 'STARTS', 'CycleHistory', 'run_cycles']
+__all__ = ['SCHEMES', 'SCHEME_NAMES', 'STARTS', 'HARTREE', 'CycleHistory', 'run_cycles']

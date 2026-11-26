@@ -188,3 +188,11 @@ pytest test_soft_mode_triplet_slow.py  # ethylene twist and C=C stretch, butadie
 pytest test_fci_vertex_split_slow.py  # H2O/6-31G, Ne/cc-pVDZ and NH3/6-31G against the pilot: about 170 s on two threads on a workstation
 # the cycle-based Hedin schemes on the Hubbard dimer: slow by the 60 s rule (workstation wall times, one thread: 35 s per (H) point and 70 s per (HF) point, measured one point at a time), about 4 minutes in all, so on ADA
 pytest test_hedin_cycles_dimer_full.py  # about 4 minutes on one thread
+# the Hedin cycles' Tier 2 on small molecules, in spatial orbitals: slow by the 60 s rule (workstation wall times, one thread: H2/STO-3G 14 s, H2/6-31G 10 s, He/cc-pVDZ 11 s from (H) and 31 s from (HF)), about a minute in all
+pytest test_hedin_cycles_tier2.py  # about a minute on one thread
+# the Hedin cycles on two-electron molecules against exact diagonalization, in spatial orbitals: slow by the 60 s rule (workstation wall times, one thread: H2/STO-3G 80 s, the boxes 73 s (SG-I/L) and 133 s (SG-Gamma/W), H2/6-31G 56 s, He/cc-pVDZ 74 s), about 7 minutes in all, so on ADA
+pytest test_hedin_cycles_two_electrons.py  # about 7 minutes on one thread
+# the Hedin cycles on one-electron systems (self-screening, H and H2+ from (HF)): slow by the 60 s rule (workstation wall times, one thread: 54 s per system)
+pytest test_hedin_cycles_one_electron.py  # about 2 minutes on one thread
+# the Hedin cycles' size consistency (two H2/STO-3G 50 and 100 bohr apart): slow by the 60 s rule (workstation wall times, one thread)
+pytest test_hedin_cycles_size_consistency.py  # about a minute on one thread

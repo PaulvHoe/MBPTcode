@@ -41,8 +41,8 @@ starts:
 
 Status: the cycle loop, its zero-dimensional (0-D) backend, which gives the diagram counts and the 0-D
 values of every scheme, and the finite-basis backend on the Matsubara axis, which runs cycles 1 and 2 of
-every scheme in spin orbitals (the Hubbard dimer and H2/STO-3G are tested). Cycle 3 and beyond, spin
-adaptation and larger molecules are the next stages.
+every scheme in spin orbitals, or for a closed shell in spatial orbitals (the Hubbard dimer, H2, He and
+one-electron systems are tested). Cycle 3 and beyond and larger molecules are the next stages.
 
 ## Running it
 
@@ -90,6 +90,7 @@ history = run_cycles(backend, 'cb_gw', 'H', cycles=2)
 history.sigmas[n].at_grid()                # Σ^(n)(iν) on the fermionic grid, n = 0 .. 2
 history.lines[n].at(range(4))              # G^(n)(iν_k), k = 0 .. 3
 history.numerical_flags                    # the named flags of the run
+history.diagnostics[n]                     # the per-cycle diagnostics of cycle n (a dict)
 ```
 
 ## What is computed
@@ -206,8 +207,9 @@ absorbed with the other factors.
 
 ### The Matsubara backend
 
-`matsubara/` holds systems in spin orbitals (`systems.py`: the Hubbard dimer from its integrals, a
-restricted pyscf mean field, any one-electron Hamiltonian h with Coulomb factors B), the start lines
+`matsubara/` holds systems in spin orbitals or, for a closed shell, in spatial orbitals (`systems.py`:
+the Hubbard dimer from its integrals, a restricted pyscf mean field, any one-electron Hamiltonian h with
+Coulomb factors B), the start lines
 (`starts.py`: aufbau SCF with DIIS, Hartree or Hartree–Fock), the grids (`grids.py`) and the operations
 and their tangents (`backend.py`, `tangents.py`). Everything lives in the start line's orbitals, at the
 inverse temperature β, with the chemical potential μ in the middle of the start's gap. ν_n = (2n + 1)π/β
@@ -239,7 +241,10 @@ replaced by its model line. For a level x of the model line and z = iν − x, t
 (1/β) Σ_{|m|>m_c} 1/((iΩ_m + z) iΩ_m) is a difference of digamma functions. The frequency-dependent part
 of a vertex decays as 1/Ω, so without the tail the transfer box converged as its inverse (on the
 half-filled dimer at β = 40/t and U = 0.1t, SG-I/L's cycle-2 error was 3.6e-5, 2.3e-5 and 1.5e-5 for
-m_vertex = 8, 16 and 32, against 4.9e-6 converged). With it every cutoff converges as its cube. The tail is linear in the summand at the two
+m_vertex = 8, 16 and 32, against 4.9e-6 converged). With it every cutoff converges as its cube on the dimer.
+On H2/STO-3G at β = 72/Ha the transfer box converges more slowly: the error of cycle 2 from `'HF'` against
+exact diagonalization falls as m_vertex^(−2.7) (with m_boson = 8 m_vertex), and the default box, whose
+transfers reach 1.4 Ha (1.8 times the start's gap), cuts 61 % of that error at λ = 0.1. The tail is linear in the summand at the two
 ends, so the Γ/W and I/L forms of one self-energy, whose summands agree transfer by transfer, agree with
 their tails as well.
 
@@ -282,12 +287,24 @@ there they return the inverse of a nearly singular matrix, unflagged.
 
 ## Options
 
-`run_cycles(alg, scheme, start, cycles, lag=True)`:
+`run_cycles(alg, scheme, start, cycles, lag=True, hartree='line')`:
 - `scheme`: `'sg_il'`, `'sg_gw'`, `'cb_gw'` or `'cb_il'`,
 - `start`: `'H'` or `'HF'`,
 - `cycles`: a positive integer,
 - `lag=False`: SG-Γ/W with its vertex taken with respect to the Hartree term of G^(n−1) itself, which
-  is SG-I/L (refused for the other schemes).
+  is SG-I/L (refused for the other schemes),
+- `hartree`: the density the Hartree term of cycle n is built on. `'line'` (the default) takes that of
+  G^(n−1). `'linearized'` takes, from cycle 2 on, the linearized density ρ^(0) + (1/β) Σ_ν G^(0)(Σ^(n−1) −
+  Σ^(0))G^(0), the start's density ρ^(0) plus its first-order response, summed over every frequency
+  (`backend.linearized_line`). The Dyson lines keep the start's chemical potential and need not hold the
+  electron count (see the properties below), and the linearized density does: on H2/STO-3G from `'H'` its
+  trace moves by 1e-11 at β = 80/Ha where the cycle-1 line's moves by +0.019. It differs from the line's
+  density at second order in the interaction, so cycle 2 changes at λ³ from `'H'` and at λ⁵ from `'HF'`
+  and keeps its order of exactness. A chemical potential cannot do this: the extra charge sits in
+  satellite weight of the empty orbitals below μ, so inside the gap the line's count does not move, and a
+  level shift against the fixed Σ^(1) reaches the electron count only at −0.43 Ha. `'linearized'` needs the
+  Matsubara backend and `lag=True` (the tangent of the linearized density is not written), and
+  `CycleHistory.hartree_lines[n]` holds each Hartree term's source.
 
 `zero_d.ZeroDBackend(loop_weight=1, coupling=0, order=8, eps_order=1)`:
 - `loop_weight`: ℓ,
@@ -298,8 +315,16 @@ there they return the inverse of a nearly singular matrix, unflagged.
   cycle-based scheme and at least 1.
 
 `matsubara.backend.MatsubaraBackend(system, start, numerics=None, w_order='4,1')`:
-- `system`: a `systems.System` (`hubbard_dimer(t, U, eps, nelec)`, `from_pyscf(mf)`,
-  `spin_orbital(h, factors, nelec)`),
+- `system`: a `systems.System` (`hubbard_dimer(t, U, eps, nelec, spin_adapted=False)`,
+  `from_pyscf(mf, spin_adapted=False)`, `spin_orbital(h, factors, nelec)`, `spatial(h, factors, nelec)`).
+  `System.spin` is 1 for spin orbitals and 2 for a closed shell in spatial orbitals (spin adaptation, an
+  even electron count). Every source of the cycles is a charge density, so for a closed shell every object
+  of the cycles is the same for both spins, the singlet channel. The spatial form holds one spin block and
+  puts a factor 2 on every closed fermion loop: the Hartree term (Σ_H, the Hartree part of a static kernel
+  and its tangent) and the polarizability (and its tangent). It reproduces the spin-orbital runs of every
+  scheme to 1e-12 and runs 6 to 7 times faster (He/cc-pVDZ: SG schemes 2 s and 7 s from `'H'` and `'HF'`
+  against 13 s and 48 s, cycle-based Γ/W 26 s and 47 s, at β = 20/Ha and n_fermion = m_boson = 32,
+  n_vertex = 8, m_vertex = 4),
 - `start`: `'H'` or `'HF'`,
 - `numerics`: a `Numerics`, whose `hedin` section gives `beta` (1/Hartree, None for `HEDIN_BETA_GAP`
   = 56 over the start's gap, so that the distance to T = 0, of order exp(−β·gap/2), is 7e-13),
@@ -307,7 +332,8 @@ there they return the inverse of a nearly singular matrix, unflagged.
   `m_vertex` (the vertex box, default 16 each, inside those grids), `bse_tol` and `bse_max_iter` (the
   GMRES of a kernel at fixed form, 1e-10 relative in at most 300 inner iterations, in restart cycles of
   `HEDIN_BSE_RESTART` = 60) and `scf_tol` and `scf_max_iter` (the start's SCF). The grid defaults are
-  provisional, measured on the dimer and H2 only. Keep `m_vertex` well inside `m_boson` (on H2 the
+  provisional, measured on the dimer and H2 only, and the default box is too small for the vertex of
+  cycle 2 (see the tails above and the two-electron test below). Keep `m_vertex` well inside `m_boson` (on H2 the
   routes' identities lose a factor 10 when it is a quarter of it) and `n_vertex` ≥ `m_vertex` (mirroring a
   vertex shears its box by up to `m_vertex`, and the asymmetry this leaves in P^(2) falls as `n_vertex`
   grows). The defaults keep `m_vertex` = `m_boson`/8 and `n_vertex` = `m_vertex`. A `Grids` is read as a
@@ -342,6 +368,26 @@ half filled), before any cycle. A start whose SCF does not converge raises.
 `CycleHistory.numerical_flags` holds the named flags raised during the run. The Matsubara backend raises
 `'hedin_bse_not_converged'` (`HedinBSEWarning`) when the GMRES of a kernel at fixed form stops above
 `bse_tol`, and keeps its last iterate. The 0-D backend raises none.
+
+`CycleHistory.diagnostics[n]` holds the per-cycle diagnostics of TEST_PLAN section 8 for cycle n, reported
+and not asserted, from `MatsubaraBackend.cycle_diagnostics` (the 0-D backend gives empty dicts). Each is the
+worst over its grid:
+- `excess_charge`: tr ρ(G^(n)) minus the electron count (the Dyson lines need not conserve it, see below),
+- `hartree_charge`: the same for the density cycle n's Hartree term is built on (n ≥ 1),
+- `sigma_change`: max |Σ^(n) − Σ^(n−1)| (n ≥ 1),
+- `dyson_min`: the smallest singular value of 1 − G^(0)(Σ^(n) − Σ^(0)), how close the cycle's Dyson equation
+  comes to singular (n ≥ 1),
+- `screening_min`: the smallest |eigenvalue| of 1 − P^(n)(Ω), where the run keeps W^(n) (SG-Γ/W from
+  cycle 2),
+- `chain_min`: the smallest |eigenvalue| of SG-Γ/W's factor 1 + Λ_H (1 at cycle 2 with the lag),
+- `bubble_charge`: the largest charge tr(G^(n−1) Γ^Q G^(n−1)) that a source Q induces at Ω_m ≠ 0, zero for a
+  bubble that conserves charge (SG-Γ/W from cycle 2),
+- `start_bse_min` (n = 0): the smallest |eigenvalue| of 1 − K χ(0) for the start's I/L and Γ/W BSEs, formed
+  densely up to `HEDIN_DIAGNOSTICS_MAX_N` = 40 orbitals, over every spin channel in spin orbitals and in the
+  singlet channel in spatial orbitals,
+- `start_bse_min_triplet` (n = 0, spatial orbitals): the same in the triplet channel, where the Hartree term
+  drops out (the smaller of the two is the spin-orbital value).
+The BSE of a kernel at fixed form is solved by GMRES, and its spectrum is not formed.
 
 ## Checked in `tests/test_hedin_cycles_zero_d.py`
 
@@ -415,12 +461,104 @@ every scheme just past the RHF crossing (U = 2.0002t, with the largest eigenvalu
 1 at 2.0t and above it there) and at 3t from `'HF'`, every scheme at 8t and both SG schemes at 16t from
 `'H'`. The slow file also asserts that no GMRES stopped short.
 
+`tests/test_hedin_cycles_tier2.py` (slow, about a minute, in spatial orbitals): TEST_PLAN's Tier 2 on small
+molecules, which needs no reference. The two-electron integrals are scaled, v → λv, the start is rerun at
+λ = 0.1, 0.05 and 0.025, and ‖X‖ is the Frobenius norm of X over the four lowest frequencies and all spin
+orbitals (the largest element is not smooth in λ once the element that holds it changes). Then
+‖Σ^(n) − Σ^(n−1)‖ must scale as λ^n from `'H'` and as λ^(n+1) from `'HF'` (n = 1, 2), and cycle 2 of two
+schemes must differ as λ³ from `'H'` and as λ⁴ from `'HF'`, where the 0-D counts of every scheme agree with
+the exact ones through v² and v³. The two cycle-based schemes are equal at cycle 2 and are not paired.
+With s₁ the slope of log ‖X‖ against log λ between 0.1 and 0.05 and s₂ the slope between 0.05 and 0.025,
+the extrapolated slope 2s₂ − s₁ removes the next order, and the successive cycles are read from it (within
+0.01 on H2/STO-3G and H2/6-31G). The scheme differences are read from s₂ alone, with a bar that still
+separates their power from the one below, since the two routes' cut enters them one order early: from
+`'H'` SG-I/L against the cycle-based schemes carries a λ² part 1.6e-3 of the cycle's own λ² change on the
+file's grids (s₁ = 2.84, s₂ = 2.71). The measured s₂ run from 2.71 to 2.96 from `'H'` and from 3.93 to 4.01
+from `'HF'`. On He/cc-pVDZ the `'HF'` difference of the SG schemes carries a λ³ part (slopes 3.93 and 3.88),
+reported and not asserted: the transfer box cuts a λ³ term from both schemes
+(next paragraph), and He's box of 4 transfers reaches 1.26 Ha, below its lowest excitation at 1.96 Ha.
+Boxes of 8 and 12 take its extrapolated slope from 3.72 to 3.91 and 3.96 (largest element, on ADA). On ADA the cycle-based schemes on H2/6-31G and He/cc-pVDZ follow the same orders
+(largest element: successive cycles within 0.01, differences extrapolated to 2.96 to 3.01 and 4.00 to
+4.03).
+
+`tests/test_hedin_cycles_two_electrons.py` (slow, about 7 minutes, on ADA): two-electron molecules against
+exact diagonalization, the dimer's Tier 4 on molecules, in spatial orbitals (the exact problem is set up in
+spin orbitals and one spin block taken). The interaction is scaled as in Tier 2, and the
+error of a cycle is the Frobenius norm of [G^(n)]^(−1) − [G_exact]^(−1) at the four lowest frequencies,
+with G_exact the T = 0 Lehmann G. It must scale as the cycle's first wrong order: λ² (cycle 1) and λ³
+(cycle 2) from `'H'`, λ³ and λ⁴ from `'HF'`. The dynamic part of the cycle-2 vertex is second order, so
+the transfer box cuts a λ³ term, the order that cycle 2 from `'HF'` must get right. At the default box
+cycle 2 from `'HF'` on H2/STO-3G therefore scales as λ³ (extrapolated slopes 2.84 and 2.94 for the two SG
+schemes), and with the error extrapolated to an infinite box from the boxes 24, 36 and 54 (Richardson with
+the measured exponent, 2.7) it scales as λ⁴. The file checks cycles 1 and 2 from `'H'` and cycle 1 from
+`'HF'` at the default box on H2/STO-3G (cycle-based Γ/W included), H2/6-31G and He/cc-pVDZ, and cycle 2
+from `'HF'` on H2/STO-3G on the extrapolated box. Every extrapolated slope comes within 0.06 of its order.
+He needs a larger boson grid than H2 (m_boson = 128 at β = 30/Ha): with 64, cycle 1 from `'HF'` carries a λ²
+cut of 1.2 % of its second-order self-energy (extrapolated slope 2.41 where 3 is due).
+
+`tests/test_hedin_cycles_one_electron.py` (slow, about 2 minutes): H/6-31G and H2+/STO-3G from `'HF'` at
+β = 90/Ha, at full coupling (the start's gap closes with the interaction, so these systems are not scaled).
+With one electron in the occupied spin orbital o, o can take no second electron, so the exact G has no
+element between o and the other spin orbitals and its oo element is the start's single pole. The occupied
+row and column of [G^(n)]^(−1) − [G^(0)]^(−1) is then the cycle's self-screening error (zero in the exact
+theory, asserted against exact diagonalization to 1e-16). Cycle 1 has none: TDHF is exact for one electron,
+and the error falls with the boson grid as its cube to a limit below 1e-3 of its value at 128. Cycle 2 has
+some, reported: SG-I/L 5.9e-5 (H) and 1.5e-5 (H2+) extrapolated in the box. SG-Γ/W's moves with the box
+through its lag, while SG-I/L − SG-Γ/W = −G^(1)(W^(1) − W^(2))Γ^(2) holds on every box (asserted).
+
+`tests/test_hedin_cycles_size_consistency.py` (slow, about a minute): two H2/STO-3G molecules 50 bohr
+apart against one, at β = 40/Ha, in the basis of each molecule's own orbitals. Nothing couples the
+molecules in [G^(n)]^(−1) (2e-16), and on each molecule the pair gives the single molecule's once the
+Hartree potential of the other molecule's density change is taken off: SG-I/L to 3e-9 at every cycle, and
+SG-Γ/W at cycles 0 and 1. Two terms are reported (see the properties below): the excess charge of the
+Dyson lines, and the 1/R² term of SG-Γ/W's cycle-2 screening.
+
+`tests/test_hedin_cycles_hartree_option.py` (fast, 27 s): `hartree='linearized'` on H2/STO-3G. Its density
+holds the electron count (1e-11 against +0.019 for the line), two H2 50 bohr apart give one H2's cycle 2
+without correction (2.7e-7 against 3.8e-4), cycle 2 from `'H'` stays exact through v² against exact
+diagonalization, the option changes cycle 2 at λ³ from `'H'` and λ⁵ from `'HF'` and cycle 1 not at all,
+and the refusals.
+
+`tests/test_hedin_cycles_spin_adapted.py` (fast, 12 s): the spatial form against the spin-orbital one,
+every scheme from both starts on H2/STO-3G and the asymmetric dimer (Σ^(n), n = 0, 1, 2, equal to both spin
+blocks to 1e-12, nothing between the spins), `hartree='linearized'` the same, the diagnostics the same
+(the spin-orbital start BSE the smaller of the singlet and triplet), and the refusals (an odd electron
+count in spatial orbitals, a spin other than 1 or 2).
+
+`tests/test_hedin_cycles_diagnostics.py` (fast, 2 s): the diagnostics on H2/STO-3G against independent
+numbers (the start's Γ/W BSE against 1 − λ_max of K χ(0), the chain-rule factor 1 at cycle 2 with the lag
+and not without it, the excess charge, the bubble charge).
+
+## Properties found on molecules
+
+- The Dyson lines keep the start's chemical potential, so they do not conserve the particle number. From
+  `'H'` the cycle-1 line of H2/STO-3G holds 2.0186 electrons at low temperature (from `'HF'` 2.0000). The
+  Hartree term of the next cycle, Σ_H[G^(n−1)], then holds the excess charge dN of every molecule: two
+  molecules R apart shift each other's levels by dN/R (−3.8e-4 Ha at 50 bohr), a term that grows with the
+  number of molecules. Cycle 2 from `'H'` is therefore not size consistent in any scheme with the default
+  `hartree='line'`. With `hartree='linearized'` SG-I/L matches the single molecule to 2.7e-7 without any
+  correction.
+- SG-Γ/W's cycle-2 polarizability P^(2) = G^(1) G^(1) Γ^(2) does not conserve charge: a source induces a
+  charge 1.1e-2 (`'H'`) and 4.0e-3 (`'HF'`) at Ω ≠ 0 on H2/STO-3G, where the start's bubble induces none.
+  Each molecule's charge then fluctuates in W^(2), and two molecules R apart couple as 1/R² (1.7e-6 Ha at
+  50 bohr). SG-I/L keeps the start's L^(1) and has no such term.
+- At finite temperature each molecule's electron number fluctuates by the f(1 − f) of its levels, which
+  couples molecules as 1/R² as well. The cycles' lines can bring a level closer to the chemical potential
+  than the start has it (H2/STO-3G from `'H'`: the cycle-1 line's lowest empty level is 0.2 Ha above μ), so a
+  temperature set by the start's gap alone can leave the cycles thermally occupied (2.0422 electrons at
+  β = 20/Ha against 2.0186 at 80).
+- The transfer box cuts a λ³ term from cycle 2 (see the two-electron test above), and the default box,
+  whose transfers reach 1.8 times the start's gap, is too small for cycle 2's vertex.
+
 ## What it leaves out
 
 - Cycle 3 and beyond on the Matsubara axis: the tangent of a self-energy built on a frequency-dependent
   vertex, and the kernels of a kernel, are not written yet (`NotImplementedError`).
-- Spin adaptation (spin orbitals only), molecules beyond H2/STO-3G, quasiparticle and excitation
-  energies by continuation, and the comparison with the BSE(2) routes.
+- Open shells in spatial orbitals (spin adaptation is for closed shells, open shells run in spin orbitals),
+  molecules beyond He/cc-pVDZ, quasiparticle and excitation energies by continuation, the comparison with
+  explicit second- and third-order self-energies, and the comparison with the BSE(2) routes.
+- A Dyson line that holds the electron count (the option `hartree='linearized'` puts the count right in the
+  Hartree term only), and the tangent of the linearized density (so `lag=False` and cycle 3 refuse it).
 - The treatment of instabilities: the cycles run through them, but an unstable channel is not replaced.
 - Counts say how many diagrams a cycle holds, not which ones, and nothing about accuracy, signs,
   cancellations or convergence at finite coupling.

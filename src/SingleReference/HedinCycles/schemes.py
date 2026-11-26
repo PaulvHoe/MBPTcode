@@ -49,6 +49,8 @@ SCHEMES = ('sg_il', 'sg_gw', 'cb_gw', 'cb_il')
 SCHEME_NAMES = {'sg_il': 'SG-I/L', 'sg_gw': 'SG-Gamma/W',
                 'cb_gw': 'cycle-based Gamma/W', 'cb_il': 'cycle-based I/L'}
 STARTS = ('H', 'HF')
+#: the source of the Hartree term of cycle n >= 2: the line G^(n-1), or its linearized density
+HARTREE = ('line', 'linearized')
 ROUTE = {'sg_il': 'il', 'cb_il': 'il', 'sg_gw': 'gw', 'cb_gw': 'gw'}
 
 
@@ -85,7 +87,12 @@ class CycleHistory:
     For SG-Gamma/W, vertices[n] and screened[n] hold Gamma^(n) and W^(n) from cycle 2 on (None
     before), and legs holds the start's G^(0) Gamma^(1) G^(0). For SG-I/L, l1 holds the start's L^(1).
     For every other scheme these stay None. numerical_flags holds the named flags raised during the run
-    (`src.Base.numerical_flags`), each distinct one once.
+    (`src.Base.numerical_flags`), each distinct one once. diagnostics[n] holds the backend's per-cycle
+    diagnostics of cycle n (TEST_PLAN section 8: the excess charge of G^(n), the change of Sigma, the distance
+    of each Dyson equation, screening and chain-rule factor from singular, the charge a bubble induces), a dict
+    of named numbers, empty for a backend without cycle_diagnostics (the 0-D backend). hartree_lines[n] holds
+    the source of cycle n's Hartree term (G^(n-1), or with hartree='linearized' its linearized density from
+    cycle 2 on, and G^(0) for n = 0).
     """
     scheme: str
     start: str
@@ -96,9 +103,11 @@ class CycleHistory:
     legs: object = None
     l1: object = None
     numerical_flags: list = field(default_factory=list)
+    diagnostics: list = field(default_factory=list)
+    hartree_lines: list = field(default_factory=list)
 
 
-def validate(scheme, start, cycles, lag=True):
+def validate(scheme, start, cycles, lag=True, hartree='line'):
     """Refuse a request run_cycles cannot answer, before any work is done."""
     if scheme not in SCHEMES:
         raise ValueError(f'unknown scheme {scheme!r}: choose one of {SCHEMES}')
@@ -108,9 +117,14 @@ def validate(scheme, start, cycles, lag=True):
         raise ValueError(f'cycles must be a positive integer, got {cycles!r}')
     if not lag and scheme != 'sg_gw':
         raise ValueError('lag=False is a variant of SG-Gamma/W only')
+    if hartree not in HARTREE:
+        raise ValueError(f'unknown hartree {hartree!r}: choose one of {HARTREE}')
+    if hartree == 'linearized' and not lag:
+        raise ValueError("lag=False differentiates the Hartree term of G^(n-1) along the map, and the tangent of "
+                         "the linearized density (hartree='linearized') is not written yet")
 
 
-def run_cycles(alg, scheme, start, cycles, lag=True):
+def run_cycles(alg, scheme, start, cycles, lag=True, hartree='line'):
     """Cycles 1 .. cycles of one scheme (one of SCHEMES) from one start (one of STARTS) on the
     backend alg, returned as a CycleHistory.
 
@@ -118,11 +132,22 @@ def run_cycles(alg, scheme, start, cycles, lag=True):
     (Sigma_H[G^(n-1)] in place of Sigma_H[G^(n-2)] in both Lambda pieces). That cycle is SG-I/L
     exactly (the test of the lag), and lag=False is refused for the other schemes. A backend built on
     a start line (one with start_name, the Matsubara backend) refuses any other start.
+
+    hartree='line' (the default) builds the Hartree term of cycle n on G^(n-1). hartree='linearized' builds
+    it, from cycle 2 on, on the linearized density of G^(n-1): the start's density plus its first-order
+    response to Sigma^(n-1) - Sigma^(0) (the backend's linearized_line). The Dyson lines keep the start's
+    chemical potential and need not hold the electron count (H2/STO-3G from 'H': +0.019 electrons at cycle 1),
+    so the Hartree term of the next cycle carries the excess, and two molecules R apart feel each other's as
+    dN / R. The linearized density holds the count (to 1e-11 there) and differs from the line's density at
+    second order in the interaction, so cycle 2 keeps its order of exactness. Cycle 1 is the same either way.
+    It needs a backend with linearized_line (not the 0-D one) and lag=True.
     """
-    validate(scheme, start, cycles, lag)
+    validate(scheme, start, cycles, lag, hartree)
     missing = missing_operations(alg)
     if missing:
         raise TypeError(f'the backend lacks the operations {missing}')
+    if hartree == 'linearized' and not hasattr(alg, 'linearized_line'):
+        raise TypeError("hartree='linearized' needs a backend with linearized_line (the Matsubara backend)")
     built_on = getattr(alg, 'start_name', None)
     if built_on is not None and built_on != start:
         raise ValueError(f'the backend was built on the {built_on!r} start line, so its cycles need '
@@ -131,16 +156,19 @@ def run_cycles(alg, scheme, start, cycles, lag=True):
 
     flags = []
     with collecting(flags):
-        hist = _run(alg, scheme, start, cycles, lag)
+        hist = _run(alg, scheme, start, cycles, lag, hartree)
     hist.numerical_flags = gathered(flags)
+    report = getattr(alg, 'cycle_diagnostics', None)
+    hist.diagnostics = [report(hist, n) if report else {} for n in range(len(hist.lines))]
     return hist
 
 
-def _run(alg, scheme, start, cycles, lag):
+def _run(alg, scheme, start, cycles, lag, hartree):
     S0 = start_level(alg, start)
     G0 = alg.line0
-    hist = CycleHistory(scheme, start, lines=[G0], sigmas=[alg.sigma_h(G0) + S0(G0)],
-                        vertices=[None], screened=[None])
+    hartrees = [alg.sigma_h(G0)]          # hartrees[n]: the Hartree term inside Sigma^(n)
+    hist = CycleHistory(scheme, start, lines=[G0], sigmas=[hartrees[0] + S0(G0)],
+                        vertices=[None], screened=[None], hartree_lines=[G0])
     route = ROUTE[scheme]
     level_of = gw_level if route == 'gw' else il_level
     levels = [S0]
@@ -151,22 +179,27 @@ def _run(alg, scheme, start, cycles, lag):
 
     for n in range(1, cycles + 1):
         G = hist.lines[n - 1]
+        # the Hartree term of cycle n: on G^(n-1), or from cycle 2 on its linearized density
+        source = (alg.linearized_line(hist.sigmas[n - 1] - hist.sigmas[0])
+                  if hartree == 'linearized' and n >= 2 else G)
+        hartrees.append(alg.sigma_h(source))
+        hist.hartree_lines.append(source)
         vertex = W = None
         if n == 1 or scheme in ('cb_gw', 'cb_il'):
             # cycle 1 (every scheme) and the cycle-based schemes: the level functional at G^(n-1)
             levels.append(level_of(alg, levels[-1]))
-            sigma = alg.sigma_h(G) + levels[-1](G)
+            sigma = hartrees[n] + levels[-1](G)
         elif scheme == 'sg_il':
-            sigma = (alg.sigma_h(G) + alg.sigma_x(G)
+            sigma = (hartrees[n] + alg.sigma_x(G)
                      + alg.sigma_il(G, alg.along_map(hist.sigmas[n - 1], hist.l1)))
         else:                  # sg_gw
-            # the Hartree term inside Sigma^(n-1), built from G^(n-2) (lag=False: that of G^(n-1))
-            hartree = alg.sigma_h(hist.lines[n - 2] if lag else G)
-            lam = alg.along_map(hist.sigmas[n - 1] - hartree, hist.legs)
-            lam_h = alg.along_map(hartree - alg.sigma_h(G0), hist.legs)
+            # the Hartree term inside Sigma^(n-1), built from G^(n-2) (lag=False: that of cycle n, on G^(n-1))
+            hartree_v = hartrees[n - 1] if lag else hartrees[n]
+            lam = alg.along_map(hist.sigmas[n - 1] - hartree_v, hist.legs)
+            lam_h = alg.along_map(hartree_v - hartrees[0], hist.legs)
             vertex = alg.sg_vertex(lam, lam_h)
             W = alg.screen(alg.polarizability(G, vertex))
-            sigma = alg.sigma_h(G) + alg.sigma_gw(G, W, vertex)
+            sigma = hartrees[n] + alg.sigma_gw(G, W, vertex)
         hist.sigmas.append(sigma)
         hist.lines.append(alg.dyson(sigma - hist.sigmas[0]))
         hist.vertices.append(vertex)

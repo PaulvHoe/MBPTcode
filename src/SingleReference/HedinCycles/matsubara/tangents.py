@@ -218,7 +218,7 @@ class Tangents:
         if t is None or t.Y is None:
             return None
         B = self.ctx.B
-        coeff = np.einsum('Psr,wRrs->wRP', B, self._density(t))
+        coeff = self.ctx.spin * np.einsum('Psr,wRrs->wRP', B, self._density(t))     # a loop over both spins
         out = ThreePoint(self.ctx, False, np.einsum('wRP,Ppq->wRpq', coeff, B))
         out.coeff = coeff
         return out
@@ -281,7 +281,11 @@ class Tangents:
             Dm = self._perturbed(line, Ys, None, m, np.arange(-span, span), model=True)   # (nU, R, N, N)
             dG = line.G - line.model(g.fermion_n)                                          # (ng, N, N)
         acc = np.zeros_like(out)
-        per_w = 16 * N * N * (2 * len(nD) * (Q + 1) + (2 * nf * (2 * Q + 2 * R) if dynamic else 0))
+        # the blocks of w are sized for the largest transfer of the vertex box, so that every transfer uses
+        # the same blocks: blocks that grew by one frequency per transfer made the macOS allocator keep each
+        # freed block (1.7 GB resident for H2/STO-3G at the default grids, with 0.35 GB alive)
+        nD_max = 2 * (nf + max(abs(m), g.m_vertex))
+        per_w = 16 * N * N * (2 * nD_max * (Q + 1) + (2 * nf * (2 * Q + 2 * R) if dynamic else 0))
         for sl in self._wblocks(per_w):
             ww, gm = w[sl], vertex_static[sl]
             # sum_nu' (D - D_m)(nu') Gam(w) G(nu' - w)
@@ -338,7 +342,7 @@ class Tangents:
                 S += self.triangle(tG, gam, m)
             if tV is not None:
                 S += self._chi_shifted(G, tV.at(k), m)
-            return np.einsum('Pba,wRQab->wRPQ', B, S)
+            return self.ctx.spin * np.einsum('Pba,wRQab->wRPQ', B, S)               # a loop over both spins
         return BosonTangent(at)
 
     def _chi_shifted(self, line, X, m):

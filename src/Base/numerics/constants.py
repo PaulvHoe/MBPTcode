@@ -3450,7 +3450,14 @@ HEDIN_BSE_MAX_ITER = 300
 # The defaults keep m_vertex = m_boson / 8 and n_vertex = m_vertex. At beta = 20 the dimer's cycle-2 errors
 # converge to 1 % with n_fermion = 64, m_boson = 128, n_vertex = 8 and m_vertex = 32, a box that breaks the
 # second rule harmlessly there (P^(2) of the half-filled dimer is symmetric by particle-hole symmetry).
+# Milestone 3 found the default box too small for the vertex of cycle 2: on H2/STO-3G at beta = 72 / Ha the
+# cut of the box, a lambda^3 error, is 61 % of the error of cycle 2 from (HF) at v -> 0.1 v and falls as
+# m_vertex^-2.7 (with m_boson = 8 m_vertex), tests/test_hedin_cycles_two_electrons.py.
 HEDIN_BETA_GAP = 56.0
+# HEDIN_DIAGNOSTICS_MAX_N: the largest number of spin orbitals for which MatsubaraBackend.cycle_diagnostics forms
+# the start's BSEs densely in pair space (an (N^2, N^2) eigenvalue problem, 2.6e6 elements at 40), for the
+# smallest eigenvalue of 1 - K chi(0). Above it start_bse_min is (None, None).
+HEDIN_DIAGNOSTICS_MAX_N = 40
 HEDIN_N_FERMION = 128
 HEDIN_M_BOSON = 128
 HEDIN_N_VERTEX = 16

@@ -1,6 +1,7 @@
 """The finite-basis Matsubara backend of the Hedin cycles.
 
-Everything lives in the spin orbitals of the start line (its levels e on the diagonal), on the
+Everything lives in the orbitals of the start line (its levels e on the diagonal), spin orbitals or, for a
+closed shell, spatial orbitals with a factor ctx.spin = 2 on every closed fermion loop (systems.py), on the
 Matsubara axis at the inverse temperature beta (grids.py). The operations of algebra.py take their
 imaginary-time forms here, each with its own signs, and the cycle loop holds none:
 
@@ -36,7 +37,7 @@ from scipy.sparse.linalg import LinearOperator, gmres
 from scipy.special import expit, psi
 
 from src.Base.numerical_flags import flag
-from src.Base.numerics.constants import HEDIN_BSE_RESTART, HEDIN_CONFLUENT
+from src.Base.numerics.constants import HEDIN_BSE_RESTART, HEDIN_CONFLUENT, HEDIN_DIAGNOSTICS_MAX_N
 from src.Base.numerics.numerics import Numerics
 from src.SingleReference.HedinCycles.matsubara.grids import Grids
 from src.SingleReference.HedinCycles.matsubara.starts import start_line
@@ -70,10 +71,11 @@ _ids = itertools.count()
 
 
 class Context:
-    """What every object of one run shares: the grids, mu, the factors in the start's orbitals."""
+    """What every object of one run shares: the grids, mu, the factors in the start's orbitals, and spin, the
+    factor of a closed fermion loop (1 in spin orbitals, 2 for a closed shell in spatial orbitals)."""
 
-    def __init__(self, grids, mu, B):
-        self.grids, self.mu, self.B = grids, mu, B
+    def __init__(self, grids, mu, B, spin=1):
+        self.grids, self.mu, self.B, self.spin = grids, mu, B, spin
         self.N, self.naux = B.shape[1], B.shape[0]
 
 
@@ -166,6 +168,29 @@ class Line:
         g = self.ctx.grids
         n = g.vertex_n
         return np.einsum('nac,...ncd,ndb->...ab', self.at(n + m), Y, self.at(n)) / g.beta
+
+
+class LinearizedLine:
+    """The density of the linearized line G^(0) + G^(0) dSigma G^(0): the start's density plus its first-order
+    response to dSigma = Sigma^(n) - Sigma^(0), summed over every fermionic frequency (the static part of dSigma
+    exactly on the model line, the rest on the grid). It has no Green's function, only density(), and serves as
+    the source of a Hartree term (run_cycles' hartree='linearized'). The Dyson line of a cycle keeps the
+    start's chemical potential and need not hold the electron count, and this density does: on H2/STO-3G from
+    'H' its trace moves by 1e-11 where the cycle-1 line's moves by +0.019. The tangent engine has no rule for it
+    yet (a later cycle that differentiates it raises NotImplementedError)."""
+
+    def __init__(self, backend, d_sigma):
+        self.ctx, self.recipe = backend.ctx, ('linearized', d_sigma)
+        self.uid = next(_ids)
+        G0, g = backend.line0, backend.ctx.grids
+        rho = G0.density() + G0.pair_sum(d_sigma.static, 0)
+        if d_sigma.dyn is not None:
+            G = G0.at(g.fermion_n)
+            rho = rho + np.einsum('nab,nbc,ncd->ad', G, d_sigma.dyn, G) / g.beta
+        self.rho = 0.5 * (rho + rho.conj().T)
+
+    def density(self):
+        return self.rho
 
 
 class SelfEnergy:
@@ -315,22 +340,27 @@ class Kernel:
     def is_static(self):
         return self.coefficients is not None
 
-    def static_apply(self, rho):
-        """K applied to a pair field whose sum over nu is rho (..., N, N): a_H Sigma_H[rho] + a_x Sigma_x[rho]."""
+    def static_apply(self, rho, triplet=False):
+        """K applied to a pair field whose sum over nu is rho (..., N, N): a_H Sigma_H[rho] + a_x Sigma_x[rho].
+        triplet=True drops the Hartree term (the triplet channel of a closed shell, where the loop over both
+        spins cancels)."""
         a_h, a_x = self.coefficients
+        if triplet:
+            a_h = 0.0
         B = self.line.ctx.B
         out = np.zeros_like(rho, dtype=complex)
         if a_h:
-            out = out + a_h * np.einsum('Ppq,...P->...pq', B, np.einsum('Psr,...rs->...P', B, rho))
+            s = self.line.ctx.spin                       # the Hartree term closes a loop over both spins
+            out = out + a_h * s * np.einsum('Ppq,...P->...pq', B, np.einsum('Psr,...rs->...P', B, rho))
         if a_x:
             out = out - a_x * np.einsum('Ppr,...rs,Psq->...pq', B, rho, B)
         return out
 
-    def static_matrix(self):
-        """K as an (N*N, N*N) matrix on vec(rho) (row-major)."""
+    def static_matrix(self, triplet=False):
+        """K as an (N*N, N*N) matrix on vec(rho) (row-major), the triplet channel with triplet=True."""
         N = self.line.ctx.N
         E = np.eye(N * N).reshape(N * N, N, N)
-        return self.static_apply(E).reshape(N * N, N * N).T
+        return self.static_apply(E, triplet).reshape(N * N, N * N).T
 
 
 # --------------------------------------------------------------------------------- backend
@@ -363,7 +393,7 @@ class MatsubaraBackend:
         self.grids = grids = Grids.from_section(self.numerics.hedin, self.start.gap)
         C = self.start.C
         B = np.einsum('ip,Pij,jq->Ppq', C, system.B, C)
-        self.ctx = Context(grids, self.start.mu, B)
+        self.ctx = Context(grids, self.start.mu, B, system.spin)
         self.e = self.start.e
         self.line0 = Line(self.ctx, np.diag(self.e), recipe=('line0',))
 
@@ -375,7 +405,7 @@ class MatsubaraBackend:
     def sigma_h(self, G):
         rho = G.density()
         B = self.ctx.B
-        static = np.einsum('Ppq,Psr,rs->pq', B, B, rho)
+        static = self.ctx.spin * np.einsum('Ppq,Psr,rs->pq', B, B, rho)
         return SelfEnergy(self.ctx, static, None, ('sigma_h', G))
 
     def sigma_x(self, G):
@@ -387,6 +417,11 @@ class MatsubaraBackend:
     def dyson(self, d_sigma):
         h = np.diag(self.e).astype(complex) + d_sigma.static
         return Line(self.ctx, h, d_sigma.dyn, ('dyson', d_sigma))
+
+    def linearized_line(self, d_sigma):
+        """The start's density plus its first-order response to d_sigma (LinearizedLine), the source of the
+        Hartree term with run_cycles' hartree='linearized'."""
+        return LinearizedLine(self, d_sigma)
 
     # ------------------------------------------------------------------------ kernels
     def kernel(self, S, G):
@@ -479,7 +514,7 @@ class MatsubaraBackend:
     def polarizability(self, G, vertex):
         ctx = self.ctx
         legs = Legs(G, vertex)
-        data = np.stack([np.einsum('Pba,Qab->PQ', ctx.B, legs.pair_density(m)) for m in ctx.grids.boson_m])
+        data = ctx.spin * np.stack([np.einsum('Pba,Qab->PQ', ctx.B, legs.pair_density(m)) for m in ctx.grids.boson_m])
         return Boson(ctx, 'P', data, ('polarizability', G, vertex))
 
     def screen(self, P):
@@ -612,6 +647,81 @@ class MatsubaraBackend:
             t.coeff = np.zeros((len(g.boson_m), naux, naux), dtype=complex)
         t.recipe = ('along_map', X, legs)     # a later tangent of t has no rule yet (cycle 3)
         return t
+
+    # ---------------------------------------------------------------------- diagnostics
+    def cycle_diagnostics(self, hist, n):
+        """TEST_PLAN's per-cycle diagnostics of cycle n of a run (section 8, reported and not asserted): a dict
+        of named numbers, each the worst over its grid, read from the run without changing it.
+
+        excess_charge   tr rho(G^(n)) minus the electron count. The Dyson lines keep the start's mu and need
+                        not conserve the particle number (H2/STO-3G from 'H': +0.019 at cycle 1).
+        hartree_charge  the same for the density that cycle n's Hartree term is built on (n >= 1): the
+                        excess charge of G^(n-1), or with hartree='linearized' that of its linearized density.
+        sigma_change    max |Sigma^(n) - Sigma^(n-1)| over the fermion grid (n >= 1).
+        dyson_min       the smallest singular value of 1 - G^(0) (Sigma^(n) - Sigma^(0)) over the fermion grid
+                        (n >= 1), the distance of the cycle's Dyson equation from singular.
+        screening_min   the smallest |eigenvalue| of 1 - P^(n)(Omega) over the boson grid, where the run keeps
+                        W^(n) (SG-Gamma/W from cycle 2).
+        chain_min       the smallest |eigenvalue| of 1 + Lambda_H over the boson grid, SG-Gamma/W's chain-rule
+                        factor (from cycle 2; it is 1 at cycle 2 with the lag, where Lambda_H vanishes).
+        bubble_charge   the largest charge tr(G^(n-1) Gamma^Q G^(n-1)) that a source Q induces at Omega_m,
+                        m = 1, 2, 4, 8 (inside the boson grid), where the run keeps Gamma^(n) (SG-Gamma/W from
+                        cycle 2). A bubble that conserves charge has none.
+        start_bse_min   (n = 0) the smallest |eigenvalue| of 1 - K chi(0) for the start's two BSEs, as the pair
+                        (I/L: Hartree plus the start's exchange; Gamma/W: the start's exchange, 1 from 'H'),
+                        dense in pair space and None above HEDIN_DIAGNOSTICS_MAX_N orbitals. In spin orbitals
+                        it holds every spin channel, for a closed shell in spatial orbitals the singlet.
+        start_bse_min_triplet  (n = 0, spatial orbitals) the same in the triplet channel, where the Hartree
+                        term drops out: the minimum of the two is the spin-orbital start_bse_min.
+
+        The BSE of a kernel at fixed form (the cycle-based schemes) is solved by GMRES, and its spectrum is not
+        formed."""
+        from src.SingleReference.HedinCycles.schemes import start_level
+        ctx, g = self.ctx, self.grids
+        G = hist.lines[n]
+        s = ctx.spin
+        out = {'excess_charge': float(s * np.trace(G.density()).real - self.system.nelec)}
+        if n == 0:
+            out['start_bse_min'] = self._start_bse_min(start_level(self, self.start_name))
+            if s == 2:
+                out['start_bse_min_triplet'] = self._start_bse_min(start_level(self, self.start_name), triplet=True)
+            return out
+        out['sigma_change'] = float(np.abs(hist.sigmas[n].at_grid() - hist.sigmas[n - 1].at_grid()).max())
+        if n < len(hist.hartree_lines):
+            out['hartree_charge'] = float(s * np.trace(hist.hartree_lines[n].density()).real - self.system.nelec)
+        d_sigma = (hist.sigmas[n] - hist.sigmas[0]).at_grid()
+        D = np.eye(ctx.N)[None] - self.line0.at(g.fermion_n) @ d_sigma
+        out['dyson_min'] = float(np.linalg.svd(D, compute_uv=False).min())
+        W = hist.screened[n] if n < len(hist.screened) else None
+        if W is not None:
+            out['screening_min'] = float(min(np.abs(np.linalg.eigvals(np.linalg.inv(M))).min() for M in W.data))
+        vertex = hist.vertices[n] if n < len(hist.vertices) else None
+        if vertex is not None:
+            lam_h = vertex.recipe[2] if vertex.recipe[0] == 'sg_vertex' else None
+            if lam_h is not None and hasattr(lam_h, 'coeff'):
+                factor = np.eye(ctx.naux)[None] + np.swapaxes(lam_h.coeff, 1, 2)
+                out['chain_min'] = float(min(np.abs(np.linalg.eigvals(F)).min() for F in factor))
+            legs = Legs(hist.lines[n - 1], vertex)
+            ms = [m for m in (1, 2, 4, 8) if m <= g.m_boson]
+            out['bubble_charge'] = float(s * max(np.abs(np.trace(legs.pair_density(m), axis1=-2, axis2=-1)).max()
+                                             for m in ms))
+        return out
+
+    def _start_bse_min(self, S0, triplet=False):
+        """The smallest |eigenvalue| of 1 - K chi(0) for the start's I/L and Gamma/W BSEs (None, None above
+        HEDIN_DIAGNOSTICS_MAX_N orbitals), in the triplet channel with triplet=True."""
+        N = self.ctx.N
+        if N > HEDIN_DIAGNOSTICS_MAX_N:
+            return (None, None)
+        chi = self.line0.pair_map(0).reshape(N * N, N * N)
+        out = []
+        for S in (lambda G: self.sigma_h(G) + S0(G), S0):
+            K = self.kernel(S, self.line0)
+            if K.coefficients == (0.0, 0.0) or (triplet and K.coefficients[1] == 0.0):
+                out.append(1.0)
+                continue
+            out.append(float(np.abs(np.linalg.eigvals(np.eye(N * N) - K.static_matrix(triplet) @ chi)).min()))
+        return tuple(out)
 
     def sg_vertex(self, lam, lam_h):
         """Gamma^Q = B^Q + sum_R Lambda^R [(1 + D)^-1]_RQ, with D_PR the Hartree coefficients of Lambda_H
