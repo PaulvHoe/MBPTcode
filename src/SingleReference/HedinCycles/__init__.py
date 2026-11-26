@@ -17,6 +17,7 @@ The map of the package:
     algebra.py   the operations a backend provides, each with its equation
     schemes.py   the four schemes, the two starts and the cycle loop, written only against them
     zero_d.py    the zero-dimensional backend: exact diagram counts and 0-D values
+    matsubara/   the finite-basis backend on the Matsubara axis, in spin orbitals (see its own map)
 
 See docs/methods/hedin-cycles.md.
 """

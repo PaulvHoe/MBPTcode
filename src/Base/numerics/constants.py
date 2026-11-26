@@ -3414,3 +3414,54 @@ FCI_SPLIT_SPIN_SQUARE_BAR = 1e-6
 # at or below it is ambiguous: less than half the spectral weight either way);
 # ACTIVE_SPACE_VERTEX_TOL (a start vector O_pq|Psi0> whose norm is below it carries no pole of the
 # FCI rung, as an absent vertex).
+
+# The Matsubara backend of the Hedin cycles (`SingleReference.HedinCycles.matsubara`).
+# HEDIN_FACTOR_TOL: Coulomb factors of a system are the eigenvectors of the (ij),(kl) matrix of its
+# two-electron integrals whose eigenvalue is above this fraction of the largest (the matrix is
+# positive semidefinite, and the rest is rounding of exact zeros).
+HEDIN_FACTOR_TOL = 1e-12
+# HEDIN_SCF_TOL, HEDIN_SCF_MAX_ITER: the start line's aufbau SCF (Hartree or Hartree-Fock, with DIIS)
+# stops when the density matrix changes by less than HEDIN_SCF_TOL and the commutator FD - DF is below
+# its square root, and is refused after HEDIN_SCF_MAX_ITER iterations.
+HEDIN_SCF_TOL = 1e-12
+HEDIN_SCF_MAX_ITER = 500
+# HEDIN_GAP_MIN (Ha): a start line whose gap between the highest occupied and the lowest empty level
+# is below this has no room for the chemical potential, and the Matsubara cycles at low temperature
+# are refused (the Hartree line of a one-electron system, whose level is degenerate and half filled).
+HEDIN_GAP_MIN = 1e-6
+# HEDIN_BSE_TOL, HEDIN_BSE_MAX_ITER: the vertex (or L) BSE of a kernel that depends on frequency (the
+# cycle-based schemes' kernel at fixed form) is solved by GMRES on the vertex's static part and its part on
+# the vertex box, every source and transfer at once, to the relative residual HEDIN_BSE_TOL in at most
+# HEDIN_BSE_MAX_ITER iterations; a solve that stops short keeps its result and raises the flag
+# 'hedin_bse_not_converged'.
+HEDIN_BSE_TOL = 1e-10
+HEDIN_BSE_MAX_ITER = 300
+# HEDIN_BETA_GAP: the inverse temperature of the Hedin cycles' Matsubara backend when Numerics.hedin.beta is
+# None, as beta * gap with the start line's gap: the distance to T = 0 is of order exp(-beta gap / 2) =
+# 7e-13. HEDIN_N_FERMION, HEDIN_M_BOSON: the one-particle grid (fermionic n in [-n_fermion, n_fermion)) and
+# the boson grid (bosonic m in [-m_boson, m_boson]). HEDIN_N_VERTEX, HEDIN_M_VERTEX: the vertex box (n in
+# [-n_vertex, n_vertex), transfers |m| <= m_vertex). Provisional (milestone 2, the Hubbard dimer and
+# H2/STO-3G, to be measured on molecules in milestone 3). Two rules from those measurements: m_vertex well
+# inside m_boson (a transfer near the boson grid's edge loses the internal frequencies whose partner leaves
+# the grid, and the two routes lose them differently: on H2 the SG difference identity misses by 2.3e-4,
+# 1.2e-3 and 2.9e-3 for m_vertex = 4, 8 and 16 with m_boson = 32), and n_vertex >= m_vertex (mirroring a
+# vertex shears its box by up to m_vertex, and the asymmetry of P^(2) this leaves, where P^(2) should be
+# symmetric, falls as n_vertex grows: 1.5e-3, 8e-5 and 6e-6 for n_vertex = 4, 8 and 16 with m_vertex = 4).
+# The defaults keep m_vertex = m_boson / 8 and n_vertex = m_vertex. At beta = 20 the dimer's cycle-2 errors
+# converge to 1 % with n_fermion = 64, m_boson = 128, n_vertex = 8 and m_vertex = 32, a box that breaks the
+# second rule harmlessly there (P^(2) of the half-filled dimer is symmetric by particle-hole symmetry).
+HEDIN_BETA_GAP = 56.0
+HEDIN_N_FERMION = 128
+HEDIN_M_BOSON = 128
+HEDIN_N_VERTEX = 16
+HEDIN_M_VERTEX = 16
+# HEDIN_BSE_RESTART: the GMRES restart length of the BSE of a kernel at fixed form (Numerics.hedin.bse_tol,
+# bse_max_iter). At U <= t on the Hubbard dimer GMRES converges in 8 to 21 iterations, well inside one cycle,
+# and 60 keeps the Krylov basis (60 vectors of the vertex's size) small next to the tangents' own arrays.
+HEDIN_BSE_RESTART = 60
+# HEDIN_CONFLUENT: two Matsubara poles of the Hedin backend closer than this (in Hartree) are treated as one
+# in a divided difference (the triangle weights of tangents.py and the tail of two lines of backend.py).
+HEDIN_CONFLUENT = 1e-9
+# HEDIN_TILE_GB: the working set, in GB, of one block of the tangent engine's sums over internal bosonic
+# frequencies when Numerics.layout.tile_gb is None (the sums run in blocks of frequencies that fit it).
+HEDIN_TILE_GB = 0.25

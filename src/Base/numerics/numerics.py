@@ -29,6 +29,8 @@ The fields:
     walk        the geometry optimizer and the finite-difference steps
     layout      memory and tiling: recorded, not in the identity
     adc         the excitation-energy ADC solve of a state model
+    hedin       the Matsubara backend of the Hedin cycles: temperature, grids,
+                the BSE of a kernel at fixed form, the start line's SCF
 
 The excited-state chain and the composed surfaces hold one and read every
 setting from it (`chain_settings.chain_setting`); the drivers build it
@@ -69,6 +71,9 @@ from src.Base.numerics.constants import (BSE_ADJOINTS, BSE_DAVIDSON_CONV_TOL,
                                          XC_GRID_LEVEL, XC_GRID_LEVEL_UNRECORDED)
 from src.Base.numerics.constants import (WALK_GROUND_MAX_CYCLE, WALK_GROUND_TRUST_BOHR)
 from src.Base.numerics.constants import EE_ADC_CONV_TOL, LOOP_SOLVER_TOL_FRACTION
+from src.Base.numerics.constants import (HEDIN_BSE_MAX_ITER, HEDIN_BSE_TOL, HEDIN_M_BOSON,
+                                         HEDIN_M_VERTEX, HEDIN_N_FERMION, HEDIN_N_VERTEX,
+                                         HEDIN_SCF_MAX_ITER, HEDIN_SCF_TOL)
 from src.Base.numerics.constants import (ORBITAL_MULTIPLIER_MAX_ITER,
                                          ORBITAL_MULTIPLIER_RESIDUAL_TOL,
                                          ORBITAL_MULTIPLIER_TOL)
@@ -479,18 +484,51 @@ class ADCNumerics:
     dense_limit: Optional[int] = None
 
 
+@dataclass(frozen=True)
+class HedinNumerics:
+    """The Matsubara backend of the Hedin cycles (`SingleReference.HedinCycles.matsubara`).
+
+    beta: the inverse temperature, 1/Hartree, None for HEDIN_BETA_GAP over the start line's gap; n_fermion,
+    m_boson: the one-particle grid (fermionic n in [-n_fermion, n_fermion)) and the boson grid (bosonic m in
+    [-m_boson, m_boson]), beyond which a line is its model and a boson sum its tail; n_vertex, m_vertex: the
+    box of a vertex's frequency-dependent part (n_vertex <= n_fermion, m_vertex <= m_boson); bse_tol,
+    bse_max_iter: the GMRES solve of the vertex (or L) BSE of a kernel at fixed form, a relative residual;
+    scf_tol, scf_max_iter: the start line's aufbau SCF (the density change, the commutator below its square
+    root).
+    """
+    beta: Optional[float] = None
+    n_fermion: int = HEDIN_N_FERMION
+    n_vertex: int = HEDIN_N_VERTEX
+    m_boson: int = HEDIN_M_BOSON
+    m_vertex: int = HEDIN_M_VERTEX
+    bse_tol: float = HEDIN_BSE_TOL
+    bse_max_iter: int = HEDIN_BSE_MAX_ITER
+    scf_tol: float = HEDIN_SCF_TOL
+    scf_max_iter: int = HEDIN_SCF_MAX_ITER
+
+    def __post_init__(self):
+        if self.beta is not None and not self.beta > 0:
+            raise ValueError(f'hedin.beta={self.beta!r}: a positive inverse temperature or None')
+        for name in ('n_fermion', 'n_vertex', 'm_boson', 'm_vertex', 'bse_max_iter', 'scf_max_iter'):
+            value = getattr(self, name)
+            if isinstance(value, bool) or int(value) != value or value < 1:
+                raise ValueError(f'hedin.{name}={value!r}: a positive count')
+        if self.n_vertex > self.n_fermion or self.m_vertex > self.m_boson:
+            raise ValueError('hedin: the vertex box must lie inside the one-particle and boson grids')
+
+
 #: The sections of `Numerics`, by field name.
 SECTIONS = {'isdf': IsdfNumerics, 'scf': ScfNumerics, 'span': SpanNumerics,
             'qp': QPNumerics, 'quadrature': QuadratureNumerics,
             'bse': BSENumerics, 'solvent': SolventNumerics,
             'walk': WalkNumerics, 'layout': LayoutNumerics,
             'evgw': EvGWNumerics, 'qsgw': QsGWNumerics,
-            'imagfreq': ImagFreqNumerics, 'adc': ADCNumerics}
+            'imagfreq': ImagFreqNumerics, 'adc': ADCNumerics, 'hedin': HedinNumerics}
 
 #: Sections added after records and identities were first written: a record
 #: without one reads its defaults, and one at its defaults leaves the identity
 #: what it was before the section existed.
-LATER_SECTIONS = ('evgw', 'qsgw', 'imagfreq', 'adc')
+LATER_SECTIONS = ('evgw', 'qsgw', 'imagfreq', 'adc', 'hedin')
 
 #: The chain's flat setting names (the keywords a `SurfaceSpec` row and the
 #: chain's attributes use) and the field of `Numerics` each one is.
@@ -760,6 +798,7 @@ class Numerics:
     qsgw: QsGWNumerics = field(default_factory=QsGWNumerics)
     imagfreq: ImagFreqNumerics = field(default_factory=ImagFreqNumerics)
     adc: ADCNumerics = field(default_factory=ADCNumerics)
+    hedin: HedinNumerics = field(default_factory=HedinNumerics)
     parent: Optional[str] = None
     change: tuple = ()
     reason: Optional[str] = None

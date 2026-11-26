@@ -121,9 +121,11 @@ src/SingleReference/
                                four vertex schemes (SG-I/L, SG-Gamma/W and the
                                two cycle-based ones) from a Hartree or HF
                                start: the cycle loop written against the
-                               operations of algebra.py, and the
+                               operations of algebra.py, the
                                zero-dimensional backend (diagram counts and
-                               0-D values)
+                               0-D values) and the finite-basis Matsubara
+                               backend (matsubara/: systems, start lines,
+                               the operations and their tangents)
     Parquet/                   the parquet approximation of Marie and Loos,
                                ported from Quack: FLEX, osPA, evPA and qsPA,
                                closed shell (restricted.run_parquet) and in

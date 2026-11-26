@@ -41,6 +41,8 @@ h, or GW with the TDHF vertex and screening on f.
 """
 from dataclasses import dataclass, field
 
+from src.Base.numerical_flags import collecting, gathered
+
 from src.SingleReference.HedinCycles.algebra import missing_operations
 
 SCHEMES = ('sg_il', 'sg_gw', 'cb_gw', 'cb_il')
@@ -82,7 +84,8 @@ class CycleHistory:
 
     For SG-Gamma/W, vertices[n] and screened[n] hold Gamma^(n) and W^(n) from cycle 2 on (None
     before), and legs holds the start's G^(0) Gamma^(1) G^(0). For SG-I/L, l1 holds the start's L^(1).
-    For every other scheme these stay None.
+    For every other scheme these stay None. numerical_flags holds the named flags raised during the run
+    (`src.Base.numerical_flags`), each distinct one once.
     """
     scheme: str
     start: str
@@ -92,6 +95,7 @@ class CycleHistory:
     screened: list = field(default_factory=list)
     legs: object = None
     l1: object = None
+    numerical_flags: list = field(default_factory=list)
 
 
 def validate(scheme, start, cycles, lag=True):
@@ -112,13 +116,27 @@ def run_cycles(alg, scheme, start, cycles, lag=True):
 
     lag=False takes SG-Gamma/W's vertex with respect to the Hartree term of G^(n-1) itself
     (Sigma_H[G^(n-1)] in place of Sigma_H[G^(n-2)] in both Lambda pieces). That cycle is SG-I/L
-    exactly (the test of the lag), and lag=False is refused for the other schemes.
+    exactly (the test of the lag), and lag=False is refused for the other schemes. A backend built on
+    a start line (one with start_name, the Matsubara backend) refuses any other start.
     """
     validate(scheme, start, cycles, lag)
     missing = missing_operations(alg)
     if missing:
         raise TypeError(f'the backend lacks the operations {missing}')
+    built_on = getattr(alg, 'start_name', None)
+    if built_on is not None and built_on != start:
+        raise ValueError(f'the backend was built on the {built_on!r} start line, so its cycles need '
+                         f'start={built_on!r}, not {start!r} (its line already holds that start\'s '
+                         f'static self-energy)')
 
+    flags = []
+    with collecting(flags):
+        hist = _run(alg, scheme, start, cycles, lag)
+    hist.numerical_flags = gathered(flags)
+    return hist
+
+
+def _run(alg, scheme, start, cycles, lag):
     S0 = start_level(alg, start)
     G0 = alg.line0
     hist = CycleHistory(scheme, start, lines=[G0], sigmas=[alg.sigma_h(G0) + S0(G0)],

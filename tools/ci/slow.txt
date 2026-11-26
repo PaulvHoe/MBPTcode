@@ -186,3 +186,5 @@ pytest test_parquet_qp_solver_slow.py
 pytest test_soft_mode_triplet_slow.py  # ethylene twist and C=C stretch, butadiene, benzene: 47 s on two threads on a workstation
 # the exact FCI vertex split on the pilot's larger cases: slow by the 60 s rule (workstation wall times, 2 threads: about 170 s alone)
 pytest test_fci_vertex_split_slow.py  # H2O/6-31G, Ne/cc-pVDZ and NH3/6-31G against the pilot: about 170 s on two threads on a workstation
+# the cycle-based Hedin schemes on the Hubbard dimer: slow by the 60 s rule (workstation wall times, one thread: 35 s per (H) point and 70 s per (HF) point, measured one point at a time), about 4 minutes in all, so on ADA
+pytest test_hedin_cycles_dimer_full.py  # about 4 minutes on one thread

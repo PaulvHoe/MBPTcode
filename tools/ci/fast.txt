@@ -551,3 +551,11 @@ pytest test_soft_mode_open_shell.py  # 13 s on four threads on a workstation at 
 pytest test_fci_vertex_split.py  # 25 s on two threads on a workstation
 # the Hedin cycles in zero dimensions (exact and 50-digit arithmetic against the theory repository's reference values)
 pytest test_hedin_cycles_zero_d.py  # 2 s under pytest on one thread (0.6 s as a script)
+# the Hedin cycles on the Matsubara axis (cycle 1 against the house GW poles, the routes, the tangents, SG cycle 2, the kernels at fixed form, cycle-based cycle 2)
+pytest test_hedin_cycles_matsubara.py  # 52 s on one thread
+# the Hedin cycles on H2/STO-3G (TEST_PLAN Tier 1 on a molecule: tangents, SG and cycle-based identities, kernels at fixed form)
+pytest test_hedin_cycles_h2.py  # 42 s on one thread
+# the Hedin cycles: the SG shortcuts against the BSEs with the kernel along the map, solved on the dimer (I/L and Gamma/W) and reduced to the start's BSE on H2
+pytest test_hedin_cycles_explicit_bse.py  # 21 s on one thread
+# the Hedin cycles on the Hubbard dimer (exactness of cycles 1 and 2 against exact diagonalization, at and off half filling, cycle 2 past the RHF instability and at large U)
+pytest test_hedin_cycles_dimer.py  # 53 s on one thread

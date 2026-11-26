@@ -2,7 +2,8 @@
 
 The cycle loop (schemes.py) is written against these operations and against + and - on the objects
 they return, so the same loop runs on every backend: the zero-dimensional one (zero_d.py), where
-every object is a number or a power series in the coupling, and later the finite-basis Matsubara one.
+every object is a number or a power series in the coupling, and the finite-basis Matsubara one
+(matsubara/).
 Each operation carries its own factors of i and its signs, so the loop holds none. In zero dimensions
 every factor is +1, the counting convention in which every diagram has weight +1 and a closed fermion
 loop the weight ell.
@@ -37,7 +38,7 @@ Two requirements go beyond the list of operations, and the 0-D backend meets bot
 """
 from typing import Callable, Protocol
 
-#: Every operation of Backend by name; run_cycles refuses a backend that lacks one.
+#: Every operation of Backend by name. run_cycles refuses a backend that lacks one.
 OPERATIONS = ('line0', 'zero_self_energy', 'sigma_h', 'sigma_x', 'dyson', 'vertex_legs',
               'polarizability', 'screen', 'sigma_gw', 'solve_vertex', 'solve_l', 'apply_kernel',
               'sigma_il', 'sg_vertex', 'along_map', 'kernel')
@@ -71,7 +72,14 @@ class Backend(Protocol):
         """W(1,2) = v(1,2) + v(1,3) P(3,4) W(4,2)."""
 
     def sigma_gw(self, G, W, vertex):
-        """i G(1,3) W(1+,4) Gamma(3,2;4), the exchange-correlation self-energy of the Gamma/W route."""
+        """i G(1,3) W(4,1+) Gamma(3,2;4), the exchange-correlation self-energy of the Gamma/W route.
+
+        W meets the density end of the vertex first, as Hedin's derivation gives it before the symmetry
+        W(1,4) = W(4,1) of the exact theory is used. A truncated cycle has P^(n) = G G Gamma^(n) with its
+        vertex at one end only, so its W is not symmetric, and only this order keeps the Gamma/W route an
+        exact rewriting of the I/L route when the vertex is a response of the line. A backend may offer the
+        printed order W(1+,4) as an option (the Matsubara backend's w_order). In zero dimensions the two
+        coincide."""
 
     def solve_vertex(self, G, K):
         """Gamma(1,2;3) = delta(1,2) delta(1,3) + K(1,2;4,5) G(4,6) G(7,5) Gamma(6,7;3),

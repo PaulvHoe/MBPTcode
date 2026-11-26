@@ -39,9 +39,10 @@ starts:
 | `'H'` | h, self-consistent Hartree | Σ_H[h] | L^(1) the RPA, Γ^(1) = 1 | G0W0 on h: GW with the RPA screening of h, evaluated once on h |
 | `'HF'` | f, self-consistent Hartree–Fock | Σ_HF[f] | L^(1) the TDHF response, Γ^(1) the exchange ladder | GW with the TDHF vertex and TDHF screening on f |
 
-Status: the cycle loop and its zero-dimensional (0-D) backend, which gives the diagram counts and the
-0-D values of every scheme. The backend for molecules and model Hamiltonians on the Matsubara axis is
-the next stage and is not in the code yet.
+Status: the cycle loop, its zero-dimensional (0-D) backend, which gives the diagram counts and the 0-D
+values of every scheme, and the finite-basis backend on the Matsubara axis, which runs cycles 1 and 2 of
+every scheme in spin orbitals (the Hubbard dimer and H2/STO-3G are tested). Cycle 3 and beyond, spin
+adaptation and larger molecules are the next stages.
 
 ## Running it
 
@@ -72,21 +73,32 @@ with localcontext() as ctx:
 # G^(n) = G^(0) / (1 - kappas[n - 1])
 ```
 
-Any backend with the operations of `algebra.Backend` runs the same loop:
+Any backend with the operations of `algebra.Backend` runs the same loop. On the Matsubara axis, for the
+Hubbard dimer (hopping t, on-site interaction U) or a molecule's restricted mean field:
 
 ```python
+from pyscf import gto, scf
+from src.Base.numerics.numerics import Numerics
 from src.SingleReference.HedinCycles import run_cycles
-history = run_cycles(backend, 'cb_gw', 'HF', cycles=3)
-history.sigmas[n], history.lines[n]        # Σ^(n) and G^(n), n = 0 .. 3
+from src.SingleReference.HedinCycles.matsubara.backend import MatsubaraBackend
+from src.SingleReference.HedinCycles.matsubara.systems import from_pyscf, hubbard_dimer
+
+dimer = MatsubaraBackend(hubbard_dimer(t=1.0, U=0.5), 'HF')        # beta from the gap, default grids
+h2 = from_pyscf(scf.RHF(gto.M(atom='H 0 0 0; H 0 0 0.74', basis='sto-3g')).run())
+backend = MatsubaraBackend(h2, 'H', Numerics(hedin={'beta': 20.0, 'm_vertex': 8}), w_order='4,1')
+history = run_cycles(backend, 'cb_gw', 'H', cycles=2)
+history.sigmas[n].at_grid()                # Σ^(n)(iν) on the fermionic grid, n = 0 .. 2
+history.lines[n].at(range(4))              # G^(n)(iν_k), k = 0 .. 3
+history.numerical_flags                    # the named flags of the run
 ```
 
 ## What is computed
 
 ### The two routes
 
-Γ/W route:
+Γ/W route, with W met at the vertex's density end first (section "The W ordering" below):
 
-    Σ^(n) = Σ_H[G^(n−1)] + i G^(n−1) W^(n) Γ^(n)
+    Σ^(n) = Σ_H[G^(n−1)] + i G^(n−1) W^(n) Γ^(n),    Σ_xc(1,2) = i G(1,3) W(4,1⁺) Γ(3,2;4)
     P^(n) = −i G^(n−1) G^(n−1) Γ^(n),    W^(n) = v + v P^(n) W^(n)
     Γ^(n) = 1 + (δΣ_xc^(n−1) / δG^(n−1)) G^(n−1) G^(n−1) Γ^(n)
 
@@ -192,6 +204,82 @@ update (the SG-Γ/W vertex without its factor [1 + Λ_H]^(−1)) gives 241 diagr
 26 exist. In 0-D the cycle-2 difference of the SG schemes reads G^(1) (W^(1) − W^(2)) Γ^(2), its i
 absorbed with the other factors.
 
+### The Matsubara backend
+
+`matsubara/` holds systems in spin orbitals (`systems.py`: the Hubbard dimer from its integrals, a
+restricted pyscf mean field, any one-electron Hamiltonian h with Coulomb factors B), the start lines
+(`starts.py`: aufbau SCF with DIIS, Hartree or Hartree–Fock), the grids (`grids.py`) and the operations
+and their tangents (`backend.py`, `tangents.py`). Everything lives in the start line's orbitals, at the
+inverse temperature β, with the chemical potential μ in the middle of the start's gap. ν_n = (2n + 1)π/β
+is a fermionic and Ω_m = 2mπ/β a bosonic Matsubara frequency. The Coulomb interaction is factorized,
+v = Σ_P B^P B^P over N_aux factors (an exact eigendecomposition of the (ij|kl) matrix), so a polarizability
+or a screened interaction is an N_aux × N_aux matrix at each Ω_m, and W = Σ_PQ B^P M_PQ B^Q with
+M = (1 − P)^(−1).
+
+**Lines and sums.** A line is G(iν) = [iν + μ − h_G − Σ_dyn(iν)]^(−1). h_G is the static part of its
+inverse (for G^(n), the start's levels plus the static part of Σ^(n) − Σ^(0)), and Σ_dyn its
+frequency-dependent self-energy, kept on the one-particle grid. Its *model line* is the same with
+Σ_dyn = 0. Every sum over all
+fermionic frequencies (a density, a pair sum G X G, a triangle of three lines) is the model line's sum,
+done exactly through Fermi functions and their divided differences, plus the rest summed where it lives:
+on the one-particle grid, where a line differs from its model, and on the vertex box, where a direction
+depends on ν.
+
+**Three-point objects.** A vertex, the response of a self-energy and a kernel applied to L carry a pair
+end (outgoing ν + Ω, incoming ν) and a density end contracted with a factor B^Q, the source of frequency
+Ω. Each is stored as the bare vertex (vertices only), a part independent of ν on every Ω of the boson
+grid, and a part on the vertex box (2 n_vertex fermionic frequencies by 2 m_vertex + 1 transfers), zero
+outside it.
+
+**Tails.** The self-energy of a three-point object, −(1/β) Σ_Ω C(Ω) G(ν + Ω) X(ν; Ω) with C the coupling
+(v or W − v), runs over the boson grid for the static part and over the transfer box for the rest. Beyond
+the cutoff m_c (`m_boson` for the static part, `m_vertex` for the rest) the coupling and X side by side
+decay as Z_1(ν)/(iΩ). Z_1 is taken from the two ends of the cutoff, where the next order cancels, and G is
+replaced by its model line. For a level x of the model line and z = iν − x, the sum
+(1/β) Σ_{|m|>m_c} 1/((iΩ_m + z) iΩ_m) is a difference of digamma functions. The frequency-dependent part
+of a vertex decays as 1/Ω, so without the tail the transfer box converged as its inverse (on the
+half-filled dimer at β = 40/t and U = 0.1t, SG-I/L's cycle-2 error was 3.6e-5, 2.3e-5 and 1.5e-5 for
+m_vertex = 8, 16 and 32, against 4.9e-6 converged). With it every cutoff converges as its cube. The tail is linear in the summand at the two
+ends, so the Γ/W and I/L forms of one self-energy, whose summands agree transfer by transfer, agree with
+their tails as well.
+
+**Tangents.** A derivative is a tangent: the response of every object of a cycle to a perturbation
+δG(ν; Ω) = G(ν + Ω) Y(ν; Ω) G(ν) of a leaf line, one transfer Ω at a time, for a set of directions Y
+(amputated, three-point objects themselves). A Dyson line has Y = Y_0 + δ(Σ − Σ^(0)), with Y_0 the start
+line's direction. Every operation has its tangent rule, and the rules carry the tails of their own boson
+sums (the line term with a sum of two model lines over 1/(iΩ), minus the divided difference of the
+one-line weight). At Ω = 0 a tangent is then the derivative of the discrete self-energy, tails included,
+and agrees with finite differences to 1e-9. At Ω ≠ 0 it is the same construction, whose shifted sums
+lose the frequencies near the grid's edge: its triangles agree with brute-force sums, and its other
+rules are held by the identities between the routes. The vertex and boson tangents are built one
+transfer at a time, and the internal sums run in blocks of frequencies that fit
+`Numerics.layout.tile_gb`. Along the map the leaf is the start line and Y_0 its legs' vertex. At fixed form the leaf is a copy of the line, and `Kernel.apply(Y)` is the
+tangent of the level functional there.
+
+**The BSEs.** A static kernel (Hartree and exchange, the start's) makes the BSE a pair-space solve at
+every Ω. A kernel at fixed form depends on frequency: Γ^Q = B^Q + x^Q with x = K G (B + x) G is solved by
+GMRES for every source and transfer at once, each iteration one kernel application. On the dimer it
+takes 8 applications at U = 0.1t, 16 to 21 from (HF) at U = 1.9t to 3t, and 11 from (H) at 6.5t to 8t.
+
+**The W ordering.** A truncated cycle's P^(n) = G G Γ^(n) carries its vertex at one end only, so P^(n)
+and W^(n) are not symmetric in general. Hedin's derivation gives W(4,1), with the vertex end first,
+before the symmetry W(1,4) = W(4,1) of the exact theory is used. That order keeps the Γ/W route an exact
+rewriting of the I/L route when the vertex is a response of the line, so SG-Γ/W without its lag equals
+SG-I/L and the two cycle-based schemes coincide. The printed form W(1,4) holds the mirror-image diagrams,
+with the same counts and the same 0-D values. The two agree wherever P is symmetric: in 0-D, at cycle 1,
+on the particle-hole symmetric half-filled Hubbard dimer, and at cycle 2 of the cycle-based schemes from
+`'H'` (whose kernel is a second derivative of the GW functional) up to the vertex box. A molecule has no
+such symmetry: H2/STO-3G, though half filled, has an asymmetric P^(2). `w_order` chooses.
+
+**Instabilities.** Where an eigenvalue of K χ(Ω = 0) crosses 1, with χ the pair propagator, the BSE
+matrix becomes singular (the RHF triplet instability of the dimer crosses between U = 2.0t and 2.0002t at
+β = 10/t). The density sources of the vertex and of L drive only the charge channel, so the cycles run
+through such a crossing and beyond it, finite, where they describe an unstable reference. Their
+treatment by the soft-mode split is a later stage. Near a crossing in a channel the sources do drive,
+only the GMRES of a kernel at fixed form is checked: it slows and is flagged when it stops short. The
+static pair-space solves (the start's BSE, the SG cycles, the static vertex tangents) have no check, so
+there they return the inverse of a nearly singular matrix, unflagged.
+
 ## Options
 
 `run_cycles(alg, scheme, start, cycles, lag=True)`:
@@ -208,6 +296,24 @@ absorbed with the other factors.
   derivatives along the map (cycles − 1 for the SG schemes),
 - `eps_order`: the order of the fixed-form variable ε, at least the number of cycles of a
   cycle-based scheme and at least 1.
+
+`matsubara.backend.MatsubaraBackend(system, start, numerics=None, w_order='4,1')`:
+- `system`: a `systems.System` (`hubbard_dimer(t, U, eps, nelec)`, `from_pyscf(mf)`,
+  `spin_orbital(h, factors, nelec)`),
+- `start`: `'H'` or `'HF'`,
+- `numerics`: a `Numerics`, whose `hedin` section gives `beta` (1/Hartree, None for `HEDIN_BETA_GAP`
+  = 56 over the start's gap, so that the distance to T = 0, of order exp(−β·gap/2), is 7e-13),
+  `n_fermion` and `m_boson` (the one-particle and boson grids, default 128 each), `n_vertex` and
+  `m_vertex` (the vertex box, default 16 each, inside those grids), `bse_tol` and `bse_max_iter` (the
+  GMRES of a kernel at fixed form, 1e-10 relative in at most 300 inner iterations, in restart cycles of
+  `HEDIN_BSE_RESTART` = 60) and `scf_tol` and `scf_max_iter` (the start's SCF). The grid defaults are
+  provisional, measured on the dimer and H2 only. Keep `m_vertex` well inside `m_boson` (on H2 the
+  routes' identities lose a factor 10 when it is a quarter of it) and `n_vertex` ≥ `m_vertex` (mirroring a
+  vertex shears its box by up to `m_vertex`, and the asymmetry this leaves in P^(2) falls as `n_vertex`
+  grows). The defaults keep `m_vertex` = `m_boson`/8 and `n_vertex` = `m_vertex`. A `Grids` is read as a
+  `hedin` section with those grids and every other setting at its default. The tangent engine's working
+  set follows `numerics.layout.tile_gb` (0.25 GB when it is None).
+- `w_order`: `'4,1'` (the default) reads Σ_xc with W(4,1), `'1,4'` with the printed W(1,4).
 
 The helpers:
 - `zero_d.counts(scheme, start, cycles, order=8, loop_weight=1)`: the counts at v^1 .. v^order,
@@ -228,8 +334,14 @@ on, and `legs` = G^(0) Γ^(1) G^(0). For SG-I/L it holds `l1` = L^(1). It refuse
 unknown scheme or start, a cycle count that is not a positive integer, `lag=False` outside SG-Γ/W, and
 a backend that lacks an operation. The helpers refuse the same, and a non-integer ℓ or an order below
 1 for the counts, before any cycle. The 0-D backend refuses a sum of objects that carry different
-powers of G^(0) and a jet too short for the derivatives asked of it. No numerical flags are raised
-yet, since the 0-D backend is exact or works to a chosen precision.
+powers of G^(0) and a jet too short for the derivatives asked of it. The Matsubara backend refuses an
+unknown `w_order`, a `hedin` section (or `Grids`) with a non-positive β or count or a vertex box outside
+its grids, a `run_cycles` start other than the one it was built on, and a start without a gap (the Hartree start of a one-electron system, whose level is degenerate and
+half filled), before any cycle. A start whose SCF does not converge raises.
+
+`CycleHistory.numerical_flags` holds the named flags raised during the run. The Matsubara backend raises
+`'hedin_bse_not_converged'` (`HedinBSEWarning`) when the GMRES of a kernel at fixed form stops above
+`bse_tol`, and keeps its last iterate. The 0-D backend raises none.
 
 ## Checked in `tests/test_hedin_cycles_zero_d.py`
 
@@ -252,11 +364,64 @@ from its own 0-D module at 40 digits) and the independent closed-form maps of
 
 The whole file runs in 0.6 s as a script and in about 2 s under pytest.
 
+## Checked in the Matsubara tests
+
+`tests/test_hedin_cycles_matsubara.py` (fast, 52 s): cycle 1 against the house pole sums of
+`BSE.second_order_qp.cycle_self_energy` (G0W0 on the Hartree levels, GW with the TDHF vertex and screening
+on the HF levels) for the dimer and H2/STO-3G, on the diagonal of Σ (on these systems the off-diagonal
+elements vanish by symmetry), converging as the cube of the grids, cycle 1 the same in all four schemes
+(to 2e-15), the refusals, the tangents along the map against finite differences (to 1e-9) and gauge
+covariance (to 1e-16), the SG cycle-2 difference (in either reading of W) and the lag identity from both
+starts (with W(4,1), and the printed W(1,4) breaking it wherever P^(2) is not symmetric), the kernels at
+fixed form against finite differences (to 2e-9), cycle-based Γ/W equal to cycle-based I/L at cycle 2,
+`w_order` changing neither the cycle-1 tangents nor the kernels at fixed form, the `hedin` section and
+the flag, and the triangles at Ω ≠ 0 on the cycle-1 line against brute-force sums (to 1e-9, limited by
+the brute force's window).
+
+`tests/test_hedin_cycles_h2.py` (fast, 42 s): the same Tier-1 checks on H2/STO-3G, the lag identity from
+both starts included, whose Coulomb factors are not diagonal in one basis, so that the tails of the boson
+sums do not cancel as on the dimer.
+
+`tests/test_hedin_cycles_explicit_bse.py` (fast, 21 s): the SG shortcuts against the BSEs with the kernel
+along the map, K^(2) = (δΣ^(1)/δG^(0)) J^(−1), with J the map of a start-line direction to the cycle-1
+line, solved on the dimer by GMRES with a GMRES for J^(−1) inside every kernel application. On the I/L
+route (7e-14) this reduces exactly at cycle 2 to the start's BSE in the form the tangents apply it, so it
+checks the start's L^(1) and the solver. The Γ/W vertex of SG-Γ/W without its lag (1.3e-13) does not
+reduce: J, the Hartree response Λ_H and the factor (1 + Λ_H)^(−1) all enter. On H2/STO-3G the reduced I/L
+form holds at the L^(1) of the pair-space solve (5e-16).
+
+`tests/test_hedin_cycles_dimer.py` (fast, 53 s) and `tests/test_hedin_cycles_dimer_full.py` (slow, about 4
+minutes, on ADA): exactness against exact diagonalization on the half-filled dimer (the dimer report is
+AutomaticEquationGenerator's notes/rw_branch_test_data/dimer/convergence/REPORT.md), whose exact
+self-energy on its Hartree line is purely second order, (U²/4)/(iν − 3t) in the bonding orbital. The
+error of [G^(n)]^(−1) in the bonding orbital at the four lowest frequencies (β = 20/t, U = 0.1 and 0.05):
+
+| scheme | from `'H'` | from `'HF'` |
+|---|---|---|
+| cycle 1 | 0.069 U², slope 1.86 | 0.033 U³, slope 2.97 |
+| SG-I/L, cycle 2 | 0.049 U⁴, slope 3.90 | 0.0110 U⁴, slope 3.89 |
+| SG-Γ/W, cycle 2 | 0.054 U³, slope 2.81 | 0.0301 U⁴, slope 3.90 |
+| cycle-based Γ/W, cycle 2 | 0.026 U³, slope 2.79 | 0.021 U⁴, slope 3.92 |
+
+The slopes carry each scheme's next order (SG-I/L from `'H'` has a U⁵ term of about −0.06 U⁵). SG-Γ/W
+from `'H'`, both SG schemes from `'HF'` and the dimer report's own cycle-based kernel K[G^(1), W[h]] (W
+from the start line, built in the test from the algebra) agree with the report's large box to 2 %. SG-I/L
+from `'H'` gives 0.049 U⁴ where the report has 0.034 U⁴. Here it is converged in every cutoff and at
+β = 20/t and 40/t, while the report's value halved between its two boxes and sums the vertex without a
+tail. Off half filling (site energies 0 and 0.4t) the SG schemes are exact through each cycle's order
+(slopes 1.89, 3.50 and 2.87 from `'H'`, 2.98, 3.91 and 3.94 from `'HF'`). SG-I/L's extra order is special
+to half filling: here it keeps a small U³ term. The dimer file also runs cycle 2 past the instabilities:
+every scheme just past the RHF crossing (U = 2.0002t, with the largest eigenvalue of K χ(0) asserted below
+1 at 2.0t and above it there) and at 3t from `'HF'`, every scheme at 8t and both SG schemes at 16t from
+`'H'`. The slow file also asserts that no GMRES stopped short.
+
 ## What it leaves out
 
-- The molecular and model-Hamiltonian backend on the Matsubara axis, and with it everything that
-  needs orbitals and frequencies: quasiparticle energies, excitation energies, finite differences of
-  the kernels, the Hubbard dimer and the comparison with existing GW and BSE(2) routes.
+- Cycle 3 and beyond on the Matsubara axis: the tangent of a self-energy built on a frequency-dependent
+  vertex, and the kernels of a kernel, are not written yet (`NotImplementedError`).
+- Spin adaptation (spin orbitals only), molecules beyond H2/STO-3G, quasiparticle and excitation
+  energies by continuation, and the comparison with the BSE(2) routes.
+- The treatment of instabilities: the cycles run through them, but an unstable channel is not replaced.
 - Counts say how many diagrams a cycle holds, not which ones, and nothing about accuracy, signs,
   cancellations or convergence at finite coupling.
 - The Hartree–Fock start with its exchange self-energy held fixed (G0W0@HF as cycle 1) is not a start
